@@ -4,12 +4,27 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
+/* =========================
+   Cozy Stash Theme Tokens
+========================= */
+const THEME = {
+  bg: "#F6F1E8", // warm cream
+  card: "#FFFFFF",
+  border: "#E8E2D9",
+  text: "#3A322E",
+  muted: "#7A6F69",
+  accent: "#C47A5A", // terracotta
+  accentSoft: "#E9CFC4",
+  shadow: "0 10px 28px rgba(58,50,46,0.10)",
+  shadowStrong: "0 14px 36px rgba(58,50,46,0.18)",
+};
+
 export default function InventoryPage() {
   const router = useRouter();
 
   const [session, setSession] = useState(null);
 
-  // TOP TABS
+  // TOP TABS (now used as bottom nav)
   const [topTab, setTopTab] = useState("items"); // items | search | menu
 
   // NESTED TABS inside Items
@@ -86,7 +101,7 @@ export default function InventoryPage() {
     loadItems();
   }, [session]);
 
-  // switching TOP tabs resets deep selection states
+  // switching tabs resets deep selection states
   useEffect(() => {
     setSelectedBox(null);
     setSelectedTag(null);
@@ -95,7 +110,7 @@ export default function InventoryPage() {
     }
   }, [topTab]);
 
-  // switching nested Items tabs resets deep selection + query
+  // switching nested Items tabs resets deep selection
   useEffect(() => {
     setSelectedBox(null);
     setSelectedTag(null);
@@ -196,7 +211,6 @@ export default function InventoryPage() {
     await loadItems();
     setTimeout(() => setStatus(""), 900);
 
-    // close modal + reset
     resetAddForm();
     setIsAddOpen(false);
   }
@@ -279,7 +293,7 @@ export default function InventoryPage() {
       }
     }
 
-    // Search text (used in Items and Search tab)
+    // Search text (Items + Search tab)
     const s = q.trim().toLowerCase();
     if (!s) return list;
 
@@ -300,276 +314,279 @@ export default function InventoryPage() {
     searchFilter,
   ]);
 
+  const showFab = topTab !== "menu"; // keep it clean on Menu
+
   return (
-    <main style={{ maxWidth: 1100, margin: "20px auto", fontFamily: "system-ui", padding: 12 }}>
-      {/* Header */}
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-        <h1 style={{ margin: 0 }}>Home Inventory</h1>
-        <button onClick={signOut} style={styles.primaryBtn}>Sign Out</button>
-      </header>
-
-      {/* TOP TABS */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-        <TopTab active={topTab === "items"} onClick={() => setTopTab("items")}>Items</TopTab>
-        <TopTab
-          active={topTab === "search"}
-          onClick={() => {
-            setTopTab("search");
-            setQ("");
-            setSearchFilter("all");
-          }}
-        >
-          Search
-        </TopTab>
-        <TopTab active={topTab === "menu"} onClick={() => setTopTab("menu")}>Menu</TopTab>
-      </div>
-
-      {/* MENU TAB */}
-      {topTab === "menu" && (
-        <section style={styles.card}>
-          <h2 style={{ marginTop: 0 }}>Menu</h2>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={loadItems} style={styles.secondaryBtn}>Refresh items</button>
-            <button onClick={loadFolders} style={styles.secondaryBtn}>Refresh folders</button>
-            <button onClick={() => setIsAddOpen(true)} style={styles.primaryBtn}>+ Add item</button>
-          </div>
-          <p style={{ marginTop: 12, fontSize: 13, opacity: 0.85 }}>
-            Add more later: export, backup, settings, etc.
-          </p>
-        </section>
-      )}
-
-      {/* SEARCH TAB */}
-      {topTab === "search" && (
-        <section style={{ marginTop: 16 }}>
-          <div style={styles.card}>
-            <h2 style={{ marginTop: 0 }}>Search</h2>
-
-            {/* Quick filters */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-              <Pill active={searchFilter === "all"} onClick={() => setSearchFilter("all")}>All</Pill>
-              <Pill active={searchFilter === "recent"} onClick={() => setSearchFilter("recent")}>Recently added</Pill>
-              <Pill active={searchFilter === "unfiled"} onClick={() => setSearchFilter("unfiled")}>Unfiled</Pill>
-              <Pill active={searchFilter === "photos"} onClick={() => setSearchFilter("photos")}>Has photos</Pill>
-              <Pill active={searchFilter === "hasbox"} onClick={() => setSearchFilter("hasbox")}>Has box</Pill>
-              <button
-                onClick={() => { setSearchFilter("all"); setQ(""); }}
-                style={styles.linkBtn}
-              >
-                Clear
-              </button>
+    <main
+      style={{
+        minHeight: "100dvh",
+        background: THEME.bg,
+        color: THEME.text,
+        fontFamily: "system-ui",
+      }}
+    >
+      {/* Page container (mobile-friendly width) */}
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "16px 14px 110px" }}>
+        {/* Header */}
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <h1 style={{ margin: 0, fontSize: 22, letterSpacing: "-0.3px" }}>Cozy Stash</h1>
+            <div style={{ fontSize: 12, color: THEME.muted }}>
+              Home inventory, but calm.
             </div>
+          </div>
 
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search name, tags, box, notes…"
-              style={{ padding: 10, width: "100%", borderRadius: 10, border: "1px solid #ddd" }}
-            />
-            <p style={{ marginTop: 8, fontSize: 13, opacity: 0.8 }}>
-              Tip: try “winter”, “BX-012”, or “kitchen”.
+          {/* Keep sign out tucked here (still accessible) */}
+          <button onClick={signOut} style={styles.primaryBtn}>
+            Sign Out
+          </button>
+        </header>
+
+        {/* MENU TAB */}
+        {topTab === "menu" && (
+          <section style={styles.surfaceCard}>
+            <h2 style={{ marginTop: 0, marginBottom: 8 }}>Menu</h2>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={loadItems} style={styles.secondaryBtn}>Refresh items</button>
+              <button onClick={loadFolders} style={styles.secondaryBtn}>Refresh folders</button>
+              <button onClick={() => setIsAddOpen(true)} style={styles.primaryBtn}>+ Add item</button>
+            </div>
+            <p style={{ marginTop: 12, fontSize: 13, color: THEME.muted }}>
+              Add later: export, backup, settings, theme toggle, etc.
             </p>
-          </div>
+          </section>
+        )}
 
-          <div style={{ display: "grid", gap: 12 }}>
-            {visibleItems.map((it) => (
-              <ItemCard
-                key={it.id}
-                item={it}
-                folders={folders}
-                folderNameById={folderNameById}
-                getSignedUrl={getSignedUrl}
-                onMove={moveItem}
-                onQty={updateQuantity}
-                onDelete={deleteItem}
+        {/* SEARCH TAB */}
+        {topTab === "search" && (
+          <section style={{ marginTop: 16 }}>
+            <div style={styles.surfaceCard}>
+              <h2 style={{ marginTop: 0, marginBottom: 10 }}>Search</h2>
+
+              {/* Quick filters */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <Pill active={searchFilter === "all"} onClick={() => setSearchFilter("all")}>All</Pill>
+                <Pill active={searchFilter === "recent"} onClick={() => setSearchFilter("recent")}>Recently added</Pill>
+                <Pill active={searchFilter === "unfiled"} onClick={() => setSearchFilter("unfiled")}>Unfiled</Pill>
+                <Pill active={searchFilter === "photos"} onClick={() => setSearchFilter("photos")}>Has photos</Pill>
+                <Pill active={searchFilter === "hasbox"} onClick={() => setSearchFilter("hasbox")}>Has box</Pill>
+                <button onClick={() => { setSearchFilter("all"); setQ(""); }} style={styles.linkBtn}>
+                  Clear
+                </button>
+              </div>
+
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search name, tags, box, notes…"
+                style={styles.input}
               />
-            ))}
-            {!visibleItems.length && <p>No results.</p>}
-          </div>
-        </section>
-      )}
-
-      {/* ITEMS TAB */}
-      {topTab === "items" && (
-        <>
-          {/* Items header row */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 16 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <SubTab active={itemsView === "all"} onClick={() => setItemsView("all")}>All</SubTab>
-              <SubTab active={itemsView === "folders"} onClick={() => setItemsView("folders")}>Folders</SubTab>
-              <SubTab active={itemsView === "boxes"} onClick={() => setItemsView("boxes")}>Boxes</SubTab>
-              <SubTab active={itemsView === "tags"} onClick={() => setItemsView("tags")}>Tags</SubTab>
+              <p style={{ marginTop: 8, fontSize: 13, color: THEME.muted }}>
+                Tip: try “winter”, “BX-012”, or “kitchen”.
+              </p>
             </div>
 
-            {/* Add item button instead of inline form */}
-            {/* Floating Action Button */}
-<button
-  onClick={() => setIsAddOpen(true)}
-  style={{
-    position: "fixed",
-    right: 20,
-    bottom: 20,
-    width: 60,
-    height: 60,
-    borderRadius: "50%",
-    border: "1px solid #1f2937",
-    background: "#1f2937",
-    color: "white",
-    fontSize: 28,
-    fontWeight: "bold",
-    boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
-    zIndex: 1000,
-    cursor: "pointer",
-  }}
->
-  +
-</button>
-          </div>
+            <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+              {visibleItems.map((it) => (
+                <ItemCard
+                  key={it.id}
+                  item={it}
+                  folders={folders}
+                  folderNameById={folderNameById}
+                  getSignedUrl={getSignedUrl}
+                  onMove={moveItem}
+                  onQty={updateQuantity}
+                  onDelete={deleteItem}
+                />
+              ))}
+              {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No results.</p>}
+            </div>
+          </section>
+        )}
 
-          {/* Optional search bar on Items tab (still helpful) */}
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search within Items…"
-              style={{ padding: 10, flex: 1, borderRadius: 10, border: "1px solid #ddd" }}
-            />
-            <button onClick={loadItems} style={styles.secondaryBtn}>Refresh</button>
-          </div>
+        {/* ITEMS TAB */}
+        {topTab === "items" && (
+          <>
+            {/* Search bar at top of Items */}
+            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search your stash…"
+                style={styles.input}
+              />
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: itemsView === "folders" ? "260px 1fr" : "1fr",
-              gap: 16,
-              marginTop: 16,
-            }}
-          >
-            {/* Folders sidebar only in folders view */}
-            {itemsView === "folders" && (
-              <aside style={styles.card}>
-                <h3 style={{ marginTop: 0 }}>Folders</h3>
-
-                <button
-                  onClick={() => setSelectedFolderId("all")}
-                  style={{
-                    ...styles.sidebarBtn,
-                    fontWeight: selectedFolderId === "all" ? 800 : 500,
-                    background: selectedFolderId === "all" ? "#111827" : "#f9fafb",
-                    color: selectedFolderId === "all" ? "white" : "#111827",
-                  }}
-                >
-                  All folders
+              {/* Nested tabs (All / Folders / Boxes / Tags) */}
+              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+                <SubTab active={itemsView === "all"} onClick={() => setItemsView("all")}>All</SubTab>
+                <SubTab active={itemsView === "folders"} onClick={() => setItemsView("folders")}>Folders</SubTab>
+                <SubTab active={itemsView === "boxes"} onClick={() => setItemsView("boxes")}>Boxes</SubTab>
+                <SubTab active={itemsView === "tags"} onClick={() => setItemsView("tags")}>Tags</SubTab>
+                <button onClick={loadItems} style={{ ...styles.secondaryBtn, padding: "10px 12px" }}>
+                  Refresh
                 </button>
+              </div>
+            </div>
 
-                {folders.map((f) => (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: itemsView === "folders" ? "260px 1fr" : "1fr",
+                gap: 14,
+                marginTop: 14,
+              }}
+            >
+              {/* Folders sidebar only in folders view */}
+              {itemsView === "folders" && (
+                <aside style={styles.surfaceCard}>
+                  <h3 style={{ marginTop: 0, marginBottom: 10 }}>Folders</h3>
+
                   <button
-                    key={f.id}
-                    onClick={() => setSelectedFolderId(f.id)}
+                    onClick={() => setSelectedFolderId("all")}
                     style={{
                       ...styles.sidebarBtn,
-                      fontWeight: selectedFolderId === f.id ? 800 : 500,
-                      background: selectedFolderId === f.id ? "#111827" : "#f9fafb",
-                      color: selectedFolderId === f.id ? "white" : "#111827",
+                      fontWeight: selectedFolderId === "all" ? 900 : 700,
+                      background: selectedFolderId === "all" ? THEME.accentSoft : THEME.card,
+                      borderColor: selectedFolderId === "all" ? THEME.accent : THEME.border,
+                      color: THEME.text,
                     }}
                   >
-                    {f.name}
+                    All folders
                   </button>
-                ))}
 
-                <hr style={{ margin: "12px 0" }} />
+                  {folders.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setSelectedFolderId(f.id)}
+                      style={{
+                        ...styles.sidebarBtn,
+                        fontWeight: selectedFolderId === f.id ? 900 : 700,
+                        background: selectedFolderId === f.id ? THEME.accentSoft : THEME.card,
+                        borderColor: selectedFolderId === f.id ? THEME.accent : THEME.border,
+                        color: THEME.text,
+                      }}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
 
-                <form onSubmit={createFolder} style={{ display: "grid", gap: 8 }}>
-                  <input
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    placeholder="New folder name"
-                    style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-                  />
-                  <button style={styles.secondaryBtn}>Create folder</button>
-                  {folderStatus && <div style={{ fontSize: 13 }}>{folderStatus}</div>}
-                </form>
-              </aside>
-            )}
+                  <hr style={{ margin: "12px 0", border: "none", borderTop: `1px solid ${THEME.border}` }} />
 
-            {/* Main items panel */}
-            <section>
-              {/* Boxes selector */}
-              {itemsView === "boxes" && !selectedBox && (
-                <div style={styles.card}>
-                  <h2 style={{ marginTop: 0 }}>Boxes</h2>
-                  {boxes.length === 0 ? (
-                    <p>No box identifiers yet.</p>
-                  ) : (
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {boxes.map((b) => (
-                        <Pill key={b} active={false} onClick={() => setSelectedBox(b)}>
-                          {b}
-                        </Pill>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                  <form onSubmit={createFolder} style={{ display: "grid", gap: 8 }}>
+                    <input
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder="New folder name"
+                      style={styles.input}
+                    />
+                    <button style={styles.secondaryBtn}>Create folder</button>
+                    {folderStatus && <div style={{ fontSize: 13, color: THEME.muted }}>{folderStatus}</div>}
+                  </form>
+                </aside>
               )}
 
-              {/* Tags selector */}
-              {itemsView === "tags" && !selectedTag && (
-                <div style={styles.card}>
-                  <h2 style={{ marginTop: 0 }}>Tags</h2>
-                  {tags.length === 0 ? (
-                    <p>No tags yet.</p>
-                  ) : (
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {tags.map((t) => (
-                        <Pill key={t} active={false} onClick={() => setSelectedTag(t)}>
-                          {t}
-                        </Pill>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {(selectedBox || selectedTag) && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <button
-                    onClick={() => {
-                      setSelectedBox(null);
-                      setSelectedTag(null);
-                      setQ("");
-                    }}
-                    style={styles.secondaryBtn}
-                  >
-                    ← Back
-                  </button>
-                  <div style={{ fontWeight: 800 }}>
-                    {selectedBox ? `Box: ${selectedBox}` : ""}
-                    {selectedTag ? `Tag: ${selectedTag}` : ""}
+              {/* Main items panel */}
+              <section>
+                {/* Boxes selector */}
+                {itemsView === "boxes" && !selectedBox && (
+                  <div style={styles.surfaceCard}>
+                    <h2 style={{ marginTop: 0, marginBottom: 10 }}>Boxes</h2>
+                    {boxes.length === 0 ? (
+                      <p style={{ color: THEME.muted, margin: 0 }}>No box identifiers yet.</p>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {boxes.map((b) => (
+                          <Pill key={b} active={false} onClick={() => setSelectedBox(b)}>
+                            {b}
+                          </Pill>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div />
-                </div>
-              )}
+                )}
 
-              {/* Items list */}
-              <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-                {visibleItems.map((it) => (
-                  <ItemCard
-                    key={it.id}
-                    item={it}
-                    folders={folders}
-                    folderNameById={folderNameById}
-                    getSignedUrl={getSignedUrl}
-                    onMove={moveItem}
-                    onQty={updateQuantity}
-                    onDelete={deleteItem}
-                  />
-                ))}
-                {!visibleItems.length && <p>No items found.</p>}
-              </div>
-            </section>
-          </div>
-        </>
+                {/* Tags selector */}
+                {itemsView === "tags" && !selectedTag && (
+                  <div style={styles.surfaceCard}>
+                    <h2 style={{ marginTop: 0, marginBottom: 10 }}>Tags</h2>
+                    {tags.length === 0 ? (
+                      <p style={{ color: THEME.muted, margin: 0 }}>No tags yet.</p>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {tags.map((t) => (
+                          <Pill key={t} active={false} onClick={() => setSelectedTag(t)}>
+                            {t}
+                          </Pill>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(selectedBox || selectedTag) && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <button
+                      onClick={() => {
+                        setSelectedBox(null);
+                        setSelectedTag(null);
+                        setQ("");
+                      }}
+                      style={styles.secondaryBtn}
+                    >
+                      ← Back
+                    </button>
+                    <div style={{ fontWeight: 900 }}>
+                      {selectedBox ? `Box: ${selectedBox}` : ""}
+                      {selectedTag ? `Tag: ${selectedTag}` : ""}
+                    </div>
+                    <div />
+                  </div>
+                )}
+
+                {/* Items list */}
+                <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+                  {visibleItems.map((it) => (
+                    <ItemCard
+                      key={it.id}
+                      item={it}
+                      folders={folders}
+                      folderNameById={folderNameById}
+                      getSignedUrl={getSignedUrl}
+                      onMove={moveItem}
+                      onQty={updateQuantity}
+                      onDelete={deleteItem}
+                    />
+                  ))}
+                  {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>}
+                </div>
+              </section>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Floating Action Button (FAB) */}
+      {showFab && (
+        <button
+          onClick={() => setIsAddOpen(true)}
+          aria-label="Add item"
+          style={styles.fab}
+        >
+          +
+        </button>
       )}
+
+      {/* Bottom Navigation */}
+      <BottomNav
+        active={topTab}
+        onChange={(tab) => {
+          setTopTab(tab);
+          if (tab === "search") {
+            // keep search state, but reset quick filter to “all” if you want:
+            // setSearchFilter("all");
+          }
+        }}
+      />
 
       {/* ADD ITEM MODAL */}
       {isAddOpen && (
@@ -610,7 +627,7 @@ export default function InventoryPage() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Notes"
-              style={{ ...styles.input, minHeight: 90 }}
+              style={{ ...styles.input, minHeight: 90, resize: "vertical" }}
             />
 
             <input
@@ -634,6 +651,7 @@ export default function InventoryPage() {
               multiple
               accept="image/*"
               onChange={(e) => setFiles(Array.from(e.target.files || []))}
+              style={{ fontSize: 13 }}
             />
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
@@ -650,7 +668,7 @@ export default function InventoryPage() {
               <button style={styles.primaryBtn}>Save</button>
             </div>
 
-            {status && <p style={{ margin: 0 }}>{status}</p>}
+            {status && <p style={{ margin: 0, color: THEME.muted }}>{status}</p>}
           </form>
         </Modal>
       )}
@@ -658,22 +676,54 @@ export default function InventoryPage() {
   );
 }
 
-/* ---------- UI Components ---------- */
+/* =========================
+   UI Components
+========================= */
 
-function TopTab({ active, onClick, children }) {
+function BottomNav({ active, onChange }) {
+  return (
+    <nav
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(255,255,255,0.92)",
+        backdropFilter: "blur(10px)",
+        borderTop: `1px solid ${THEME.border}`,
+        padding: "10px 10px calc(10px + env(safe-area-inset-bottom))",
+        zIndex: 40,
+      }}
+    >
+      <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", justifyContent: "space-around", gap: 10 }}>
+        <NavBtn active={active === "items"} onClick={() => onChange("items")} icon="🏠" label="Items" />
+        <NavBtn active={active === "search"} onClick={() => onChange("search")} icon="🔍" label="Search" />
+        <NavBtn active={active === "menu"} onClick={() => onChange("menu")} icon="☰" label="Menu" />
+      </div>
+    </nav>
+  );
+}
+
+function NavBtn({ active, onClick, icon, label }) {
   return (
     <button
       onClick={onClick}
       style={{
-        padding: "10px 14px",
-        borderRadius: 999,
-        border: "1px solid #111827",
-        fontWeight: 800,
-        background: active ? "#111827" : "#f3f4f6",
-        color: active ? "white" : "#111827",
+        flex: 1,
+        display: "grid",
+        placeItems: "center",
+        gap: 4,
+        padding: "8px 8px",
+        borderRadius: 14,
+        border: `1px solid ${active ? THEME.accentSoft : "transparent"}`,
+        background: active ? THEME.accentSoft : "transparent",
+        color: active ? THEME.text : THEME.muted,
+        fontWeight: 900,
+        cursor: "pointer",
       }}
     >
-      {children}
+      <div style={{ fontSize: 18, lineHeight: 1 }}>{icon}</div>
+      <div style={{ fontSize: 12 }}>{label}</div>
     </button>
   );
 }
@@ -683,12 +733,15 @@ function SubTab({ active, onClick, children }) {
     <button
       onClick={onClick}
       style={{
-        padding: "8px 12px",
+        padding: "10px 14px",
         borderRadius: 999,
-        border: "1px solid #1f2937",
-        fontWeight: 700,
-        background: active ? "#1f2937" : "white",
-        color: active ? "white" : "#1f2937",
+        border: `1px solid ${active ? THEME.accent : THEME.border}`,
+        fontWeight: 900,
+        background: active ? THEME.accent : THEME.card,
+        color: active ? "white" : THEME.text,
+        boxShadow: active ? THEME.shadow : "none",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -703,10 +756,12 @@ function Pill({ active, onClick, children }) {
       style={{
         padding: "8px 12px",
         borderRadius: 999,
-        border: "1px solid #111827",
-        fontWeight: 700,
-        background: active ? "#111827" : "white",
-        color: active ? "white" : "#111827",
+        border: `1px solid ${active ? THEME.accent : THEME.border}`,
+        fontWeight: 900,
+        background: active ? THEME.accentSoft : THEME.card,
+        color: THEME.text,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -721,21 +776,24 @@ function Modal({ title, onClose, children }) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "rgba(0,0,0,0.30)",
+        backdropFilter: "blur(6px)",
         display: "grid",
         placeItems: "center",
         padding: 14,
-        zIndex: 50,
+        zIndex: 60,
       }}
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
         style={{
-          width: "min(700px, 100%)",
-          background: "white",
-          borderRadius: 14,
-          border: "1px solid #ddd",
+          width: "min(720px, 100%)",
+          background: THEME.card,
+          borderRadius: 18,
+          border: `1px solid ${THEME.border}`,
           padding: 14,
+          boxShadow: THEME.shadowStrong,
+          color: THEME.text,
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
@@ -763,7 +821,9 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
       if (alive) setUrls(signed.filter(Boolean));
     }
     run();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [item, getSignedUrl]);
 
   const folderName = item.folder_id ? (folderNameById.get(item.folder_id) || "Folder") : "Unfiled";
@@ -776,38 +836,50 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
         <div style={{ minWidth: 0 }}>
           <div style={ui.title}>{item.name}</div>
           <div style={ui.metaRow}>
-            <PillSmall>{folderName}</PillSmall>
-            {item.box_identifier ? <PillSmall>Box: {item.box_identifier}</PillSmall> : null}
-            {hasTags ? <PillSmall>{item.tags.slice(0, 2).join(" • ")}{item.tags.length > 2 ? " +" : ""}</PillSmall> : null}
+            <PillSmall tone="soft">{folderName}</PillSmall>
+            {item.box_identifier ? <PillSmall tone="soft">Box: {item.box_identifier}</PillSmall> : null}
+            {hasTags ? (
+              <PillSmall tone="accent">
+                {item.tags.slice(0, 2).join(" • ")}
+                {item.tags.length > 2 ? " +" : ""}
+              </PillSmall>
+            ) : null}
           </div>
         </div>
 
         {/* Kebab menu */}
         <div style={{ position: "relative" }}>
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            style={ui.kebabBtn}
-            aria-label="Item menu"
-          >
+          <button onClick={() => setMenuOpen((v) => !v)} style={ui.kebabBtn} aria-label="Item menu">
             ⋯
           </button>
 
           {menuOpen && (
             <div style={ui.menu}>
-              <button style={ui.menuItem} onClick={() => { setMenuOpen(false); onDelete(item.id); }}>
+              <button
+                style={{ ...ui.menuItem, color: "#8B2E2E" }}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete(item.id);
+                }}
+              >
                 Delete
               </button>
               <div style={ui.menuDivider} />
               <div style={{ padding: 10 }}>
-                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Move to folder</div>
+                <div style={{ fontSize: 12, color: THEME.muted, marginBottom: 6 }}>Move to folder</div>
                 <select
                   value={item.folder_id || "none"}
-                  onChange={(e) => { onMove(item.id, e.target.value); setMenuOpen(false); }}
+                  onChange={(e) => {
+                    onMove(item.id, e.target.value);
+                    setMenuOpen(false);
+                  }}
                   style={ui.select}
                 >
                   <option value="none">No folder</option>
                   {folders.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -822,7 +894,7 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
       {/* Photos */}
       {urls.length > 0 && (
         <div style={ui.photoWrap}>
-          {urls.slice(0, 4).map((u, idx) => (
+          {urls.slice(0, 4).map((u) => (
             <img
               key={u}
               src={u}
@@ -857,15 +929,14 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
           </button>
         </div>
 
-        <div style={{ fontSize: 12, opacity: 0.75 }}>
-          Tap ⋯ for move/delete
-        </div>
+        <div style={{ fontSize: 12, color: THEME.muted }}>Tap ⋯ for move/delete</div>
       </div>
     </div>
   );
 }
 
-function PillSmall({ children }) {
+function PillSmall({ children, tone = "soft" }) {
+  const isAccent = tone === "accent";
   return (
     <span
       style={{
@@ -873,11 +944,11 @@ function PillSmall({ children }) {
         alignItems: "center",
         padding: "6px 10px",
         borderRadius: 999,
-        border: "1px solid #e5e7eb",
-        background: "#f9fafb",
-        color: "#111827",
+        border: `1px solid ${isAccent ? THEME.accent : THEME.border}`,
+        background: isAccent ? THEME.accentSoft : "#FAF7F2",
+        color: THEME.text,
         fontSize: 12,
-        fontWeight: 800,
+        fontWeight: 900,
         whiteSpace: "nowrap",
       }}
     >
@@ -886,71 +957,80 @@ function PillSmall({ children }) {
   );
 }
 
+/* =========================
+   Styles
+========================= */
+
 const ui = {
   card: {
-    border: "1px solid #e5e7eb",
-    borderRadius: 16,
-    padding: 12,
-    background: "#ffffff",
-    color: "#111827",
-    boxShadow: "0 14px 35px rgba(0,0,0,0.20)",
+    border: `1px solid ${THEME.border}`,
+    borderRadius: 18,
+    padding: 14,
+    background: THEME.card,
+    color: THEME.text,
+    boxShadow: THEME.shadow,
   },
   rowBetween: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
   title: {
     fontSize: 16,
-    fontWeight: 900,
-    color: "#111827",
+    fontWeight: 950,
+    color: THEME.text,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    letterSpacing: "-0.2px",
   },
   metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
-  notes: { marginTop: 10, fontSize: 13, lineHeight: 1.35, color: "#374151" },
+  notes: { marginTop: 10, fontSize: 13, lineHeight: 1.35, color: THEME.muted },
+
   photoWrap: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 },
-  photo: { borderRadius: 14, objectFit: "cover", border: "1px solid #e5e7eb" },
+  photo: { borderRadius: 16, objectFit: "cover", border: `1px solid ${THEME.border}` },
+
   footer: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 10 },
 
   qtyWrap: {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    border: "1px solid #e5e7eb",
+    border: `1px solid ${THEME.border}`,
     borderRadius: 999,
     padding: "6px 10px",
-    background: "#f9fafb",
+    background: "#FAF7F2",
   },
   qtyBtn: {
     width: 34,
     height: 34,
     borderRadius: 999,
-    border: "1px solid #e5e7eb",
-    background: "#ffffff",
-    color: "#111827",
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    color: THEME.text,
     fontSize: 18,
-    fontWeight: 900,
+    fontWeight: 950,
+    cursor: "pointer",
   },
-  qtyValue: { minWidth: 24, textAlign: "center", fontWeight: 900, color: "#111827" },
+  qtyValue: { minWidth: 24, textAlign: "center", fontWeight: 950, color: THEME.text },
 
   kebabBtn: {
     width: 40,
     height: 40,
     borderRadius: 999,
-    border: "1px solid #e5e7eb",
-    background: "#ffffff",
-    color: "#111827",
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    color: THEME.text,
     fontSize: 22,
-    fontWeight: 900,
+    fontWeight: 950,
+    cursor: "pointer",
   },
 
   menu: {
     position: "absolute",
     right: 0,
     top: 44,
-    width: 220,
-    background: "#ffffff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    boxShadow: "0 18px 50px rgba(0,0,0,0.25)",
+    width: 230,
+    background: THEME.card,
+    border: `1px solid ${THEME.border}`,
+    borderRadius: 16,
+    boxShadow: THEME.shadowStrong,
     overflow: "hidden",
     zIndex: 80,
   },
@@ -960,80 +1040,92 @@ const ui = {
     padding: 12,
     background: "transparent",
     border: "none",
-    color: "#111827",
-    fontWeight: 800,
+    fontWeight: 950,
     cursor: "pointer",
   },
-  menuDivider: { height: 1, background: "#e5e7eb" },
+  menuDivider: { height: 1, background: THEME.border },
 
   select: {
     width: "100%",
     padding: 10,
     borderRadius: 12,
-    border: "1px solid #e5e7eb",
-    background: "#ffffff",
-    color: "#111827",
-    fontWeight: 700,
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    color: THEME.text,
+    fontWeight: 900,
   },
 };
 
-/* ---------- Styles ---------- */
-
 const styles = {
- card: {
-  marginTop: 16,
-  border: "1px solid #1f2937",
-  borderRadius: 14,
-  padding: 12,
-  background: "#0b1220",     // dark card
-  color: "#e5e7eb",          // light text inside card
-  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-},
+  surfaceCard: {
+    marginTop: 16,
+    border: `1px solid ${THEME.border}`,
+    borderRadius: 18,
+    padding: 14,
+    background: THEME.card,
+    boxShadow: THEME.shadow,
+  },
   input: {
-    padding: 10,
-    borderRadius: 10,
-    border: "1px solid #ddd",
+    padding: 12,
+    borderRadius: 14,
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    color: THEME.text,
+    outline: "none",
+    boxShadow: "inset 0 1px 0 rgba(0,0,0,0.02)",
   },
   primaryBtn: {
     padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid #111827",
-    background: "#111827",
+    borderRadius: 14,
+    border: `1px solid ${THEME.accent}`,
+    background: THEME.accent,
     color: "white",
-    fontWeight: 800,
+    fontWeight: 950,
+    cursor: "pointer",
   },
   secondaryBtn: {
     padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid #111827",
-    background: "white",
-    color: "#111827",
-    fontWeight: 800,
-  },
-  dangerBtn: {
-    padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid #991b1b",
-    background: "#991b1b",
-    color: "white",
-    fontWeight: 800,
-    height: "fit-content",
+    borderRadius: 14,
+    border: `1px solid ${THEME.border}`,
+    background: "#FAF7F2",
+    color: THEME.text,
+    fontWeight: 950,
+    cursor: "pointer",
   },
   linkBtn: {
     padding: "8px 10px",
-    borderRadius: 10,
+    borderRadius: 12,
     border: "1px solid transparent",
     background: "transparent",
-    color: "#111827",
-    fontWeight: 800,
+    color: THEME.text,
+    fontWeight: 950,
     textDecoration: "underline",
+    cursor: "pointer",
   },
   sidebarBtn: {
     width: "100%",
     textAlign: "left",
     padding: 10,
     marginBottom: 8,
-    borderRadius: 12,
-    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    cursor: "pointer",
+  },
+  fab: {
+    position: "fixed",
+    right: 16,
+    bottom: 84, // above bottom nav
+    width: 62,
+    height: 62,
+    borderRadius: "50%",
+    border: `1px solid ${THEME.accent}`,
+    background: THEME.accent,
+    color: "white",
+    fontSize: 30,
+    fontWeight: 950,
+    boxShadow: THEME.shadowStrong,
+    zIndex: 55,
+    cursor: "pointer",
   },
 };
