@@ -402,9 +402,28 @@ export default function InventoryPage() {
             </div>
 
             {/* Add item button instead of inline form */}
-            <button onClick={() => setIsAddOpen(true)} style={styles.primaryBtn}>
-              + Add item
-            </button>
+            {/* Floating Action Button */}
+<button
+  onClick={() => setIsAddOpen(true)}
+  style={{
+    position: "fixed",
+    right: 20,
+    bottom: 20,
+    width: 60,
+    height: 60,
+    borderRadius: "50%",
+    border: "1px solid #1f2937",
+    background: "#1f2937",
+    color: "white",
+    fontSize: 28,
+    fontWeight: "bold",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+    zIndex: 1000,
+    cursor: "pointer",
+  }}
+>
+  +
+</button>
           </div>
 
           {/* Optional search bar on Items tab (still helpful) */}
@@ -734,6 +753,7 @@ function Modal({ title, onClose, children }) {
 
 function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, onDelete }) {
   const [urls, setUrls] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -743,76 +763,219 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
       if (alive) setUrls(signed.filter(Boolean));
     }
     run();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [item, getSignedUrl]);
 
+  const folderName = item.folder_id ? (folderNameById.get(item.folder_id) || "Folder") : "Unfiled";
+  const hasTags = (item.tags || []).length > 0;
+
   return (
-    <div style={styles.card}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+    <div style={ui.card}>
+      {/* Header */}
+      <div style={ui.rowBetween}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{item.name}</div>
-
-          <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
-            Qty: {item.quantity || 1}
-            {item.box_identifier ? ` • Box: ${item.box_identifier}` : ""}
-            {item.folder_id ? ` • Folder: ${folderNameById.get(item.folder_id) || "Folder"}` : " • Unfiled"}
-            {item.tags?.length ? ` • Tags: ${item.tags.join(", ")}` : ""}
+          <div style={ui.title}>{item.name}</div>
+          <div style={ui.metaRow}>
+            <PillSmall>{folderName}</PillSmall>
+            {item.box_identifier ? <PillSmall>Box: {item.box_identifier}</PillSmall> : null}
+            {hasTags ? <PillSmall>{item.tags.slice(0, 2).join(" • ")}{item.tags.length > 2 ? " +" : ""}</PillSmall> : null}
           </div>
-
-          {item.notes && <p style={{ marginTop: 8 }}>{item.notes}</p>}
         </div>
 
-        <button onClick={() => onDelete(item.id)} style={styles.dangerBtn}>
-          Delete
-        </button>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          Qty
-          <input
-            type="number"
-            min="1"
-            value={item.quantity || 1}
-            onChange={(e) => onQty(item.id, e.target.value)}
-            style={{ width: 80, padding: 8, borderRadius: 10, border: "1px solid #ddd" }}
-          />
-        </label>
-
-        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          Folder
-          <select
-            value={item.folder_id || "none"}
-            onChange={(e) => onMove(item.id, e.target.value)}
-            style={{ padding: 8, borderRadius: 10, border: "1px solid #ddd" }}
+        {/* Kebab menu */}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            style={ui.kebabBtn}
+            aria-label="Item menu"
           >
-            <option value="none">No folder</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            ⋯
+          </button>
+
+          {menuOpen && (
+            <div style={ui.menu}>
+              <button style={ui.menuItem} onClick={() => { setMenuOpen(false); onDelete(item.id); }}>
+                Delete
+              </button>
+              <div style={ui.menuDivider} />
+              <div style={{ padding: 10 }}>
+                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Move to folder</div>
+                <select
+                  value={item.folder_id || "none"}
+                  onChange={(e) => { onMove(item.id, e.target.value); setMenuOpen(false); }}
+                  style={ui.select}
+                >
+                  <option value="none">No folder</option>
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Notes */}
+      {item.notes ? <div style={ui.notes}>{item.notes}</div> : null}
+
+      {/* Photos */}
       {urls.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          {urls.map((u) => (
+        <div style={ui.photoWrap}>
+          {urls.slice(0, 4).map((u, idx) => (
             <img
               key={u}
               src={u}
               alt=""
-              style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 10 }}
+              style={{
+                ...ui.photo,
+                width: urls.length === 1 ? "100%" : "calc(50% - 6px)",
+                height: urls.length === 1 ? 220 : 130,
+              }}
             />
           ))}
         </div>
       )}
+
+      {/* Footer controls */}
+      <div style={ui.footer}>
+        <div style={ui.qtyWrap}>
+          <button
+            onClick={() => onQty(item.id, (item.quantity || 1) - 1)}
+            style={ui.qtyBtn}
+            aria-label="Decrease quantity"
+          >
+            −
+          </button>
+          <div style={ui.qtyValue}>{item.quantity || 1}</div>
+          <button
+            onClick={() => onQty(item.id, (item.quantity || 1) + 1)}
+            style={ui.qtyBtn}
+            aria-label="Increase quantity"
+          >
+            +
+          </button>
+        </div>
+
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          Tap ⋯ for move/delete
+        </div>
+      </div>
     </div>
   );
 }
+
+function PillSmall({ children }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: "1px solid #e5e7eb",
+        background: "#f9fafb",
+        color: "#111827",
+        fontSize: 12,
+        fontWeight: 800,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+const ui = {
+  card: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 16,
+    padding: 12,
+    background: "#ffffff",
+    color: "#111827",
+    boxShadow: "0 14px 35px rgba(0,0,0,0.20)",
+  },
+  rowBetween: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
+  title: {
+    fontSize: 16,
+    fontWeight: 900,
+    color: "#111827",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
+  notes: { marginTop: 10, fontSize: 13, lineHeight: 1.35, color: "#374151" },
+  photoWrap: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 },
+  photo: { borderRadius: 14, objectFit: "cover", border: "1px solid #e5e7eb" },
+  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 10 },
+
+  qtyWrap: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    border: "1px solid #e5e7eb",
+    borderRadius: 999,
+    padding: "6px 10px",
+    background: "#f9fafb",
+  },
+  qtyBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    border: "1px solid #e5e7eb",
+    background: "#ffffff",
+    color: "#111827",
+    fontSize: 18,
+    fontWeight: 900,
+  },
+  qtyValue: { minWidth: 24, textAlign: "center", fontWeight: 900, color: "#111827" },
+
+  kebabBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    border: "1px solid #e5e7eb",
+    background: "#ffffff",
+    color: "#111827",
+    fontSize: 22,
+    fontWeight: 900,
+  },
+
+  menu: {
+    position: "absolute",
+    right: 0,
+    top: 44,
+    width: 220,
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    boxShadow: "0 18px 50px rgba(0,0,0,0.25)",
+    overflow: "hidden",
+    zIndex: 80,
+  },
+  menuItem: {
+    width: "100%",
+    textAlign: "left",
+    padding: 12,
+    background: "transparent",
+    border: "none",
+    color: "#111827",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  menuDivider: { height: 1, background: "#e5e7eb" },
+
+  select: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 12,
+    border: "1px solid #e5e7eb",
+    background: "#ffffff",
+    color: "#111827",
+    fontWeight: 700,
+  },
+};
 
 /* ---------- Styles ---------- */
 
