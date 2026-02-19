@@ -24,27 +24,34 @@ export default function InventoryPage() {
 
   const [session, setSession] = useState(null);
 
-  // TOP TABS (now used as bottom nav)
+  // bottom nav tabs
   const [topTab, setTopTab] = useState("items"); // items | search | menu
 
-  // NESTED TABS inside Items
+  // nested tabs inside Items
   const [itemsView, setItemsView] = useState("all"); // all | folders | boxes | tags
 
-  // SEARCH TAB quick filters
+  // Search tab quick filters
   const [searchFilter, setSearchFilter] = useState("all"); // all | recent | unfiled | photos | hasbox
 
-  // Modal
+  // Add item modal
   const [isAddOpen, setIsAddOpen] = useState(false);
+
+  // Item details sheet (tap an item)
+  const [activeItem, setActiveItem] = useState(null);
+
+  // Folder items sheet (tap a folder)
+  const [activeFolderId, setActiveFolderId] = useState(null);
 
   // Data
   const [folders, setFolders] = useState([]);
   const [items, setItems] = useState([]);
 
-  // Filters / selection
-  const [q, setQ] = useState("");
-  const [selectedFolderId, setSelectedFolderId] = useState("all");
+  // Selection for nested views
   const [selectedBox, setSelectedBox] = useState(null);
   const [selectedTag, setSelectedTag] = useState(null);
+
+  // Search query (used ONLY in Search tab)
+  const [q, setQ] = useState("");
 
   // Folder create
   const [newFolderName, setNewFolderName] = useState("");
@@ -105,16 +112,25 @@ export default function InventoryPage() {
   useEffect(() => {
     setSelectedBox(null);
     setSelectedTag(null);
+
+    // keep search scoped to Search tab
     if (topTab !== "search") {
       setSearchFilter("all");
+      setQ("");
     }
+
+    // close sheets when switching main tabs
+    setActiveItem(null);
+    setActiveFolderId(null);
   }, [topTab]);
 
-  // switching nested Items tabs resets deep selection
+  // switching nested Items tabs resets selection
   useEffect(() => {
     setSelectedBox(null);
     setSelectedTag(null);
-    setSelectedFolderId("all");
+
+    // when leaving folders view, close any folder sheet
+    if (itemsView !== "folders") setActiveFolderId(null);
   }, [itemsView]);
 
   function parseTags(text) {
@@ -218,13 +234,11 @@ export default function InventoryPage() {
   async function moveItem(itemId, newFolderId) {
     const folder_id = newFolderId === "none" ? null : newFolderId;
     const { error } = await supabase.from("items").update({ folder_id }).eq("id", itemId);
-    if (!error) loadItems();
-  }
 
-  async function updateQuantity(itemId, newQty) {
-    const qty = Math.max(1, Number(newQty) || 1);
-    const { error } = await supabase.from("items").update({ quantity: qty }).eq("id", itemId);
-    if (!error) loadItems();
+    if (!error) {
+      await loadItems();
+      setActiveItem((prev) => (prev && prev.id === itemId ? { ...prev, folder_id } : prev));
+    }
   }
 
   async function deleteItem(itemId) {
@@ -232,7 +246,10 @@ export default function InventoryPage() {
     if (!ok) return;
 
     const { error } = await supabase.from("items").delete().eq("id", itemId);
-    if (!error) loadItems();
+    if (!error) {
+      setActiveItem(null);
+      await loadItems();
+    }
   }
 
   async function signOut() {
@@ -258,6 +275,38 @@ export default function InventoryPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
+  // Count items per folder
+  const folderCounts = useMemo(() => {
+    const map = new Map();
+    for (const it of items) {
+      if (!it.folder_id) continue;
+      map.set(it.folder_id, (map.get(it.folder_id) || 0) + 1);
+    }
+    return map;
+  }, [items]);
+
+  // Up to 3 thumbnail paths per folder
+  const folderThumbPaths = useMemo(() => {
+    const map = new Map();
+    for (const it of items) {
+      if (!it.folder_id) continue;
+      const path = (it.item_photos || [])[0]?.path;
+      if (!path) continue;
+
+      const arr = map.get(it.folder_id) || [];
+      if (arr.length < 3) {
+        arr.push(path);
+        map.set(it.folder_id, arr);
+      }
+    }
+    return map;
+  }, [items]);
+
+  const activeFolderItems = useMemo(() => {
+    if (!activeFolderId) return [];
+    return items.filter((it) => it.folder_id === activeFolderId);
+  }, [items, activeFolderId]);
+
   const visibleItems = useMemo(() => {
     let list = items;
 
@@ -278,43 +327,34 @@ export default function InventoryPage() {
       } else if (searchFilter === "hasbox") {
         list = list.filter((it) => !!it.box_identifier);
       }
+
+      // Search text applies ONLY in Search tab
+      const s = q.trim().toLowerCase();
+      if (s) {
+        list = list.filter((it) => {
+          const hay = `${it.name} ${it.box_identifier || ""} ${it.notes || ""} ${(it.tags || []).join(
+            " "
+          )}`.toLowerCase();
+          return hay.includes(s);
+        });
+      }
     }
 
-    // Items tab nested view filters
+    // Items tab view filters
     if (topTab === "items") {
-      if (itemsView === "folders" && selectedFolderId !== "all") {
-        list = list.filter((it) => it.folder_id === selectedFolderId);
-      }
       if (itemsView === "boxes" && selectedBox) {
         list = list.filter((it) => it.box_identifier === selectedBox);
       }
       if (itemsView === "tags" && selectedTag) {
         list = list.filter((it) => (it.tags || []).includes(selectedTag));
       }
+      // NOTE: folders view no longer shows items here
     }
 
-    // Search text (Items + Search tab)
-    const s = q.trim().toLowerCase();
-    if (!s) return list;
+    return list;
+  }, [items, topTab, itemsView, selectedBox, selectedTag, q, searchFilter]);
 
-    return list.filter((it) => {
-      const hay = `${it.name} ${it.box_identifier || ""} ${it.notes || ""} ${(it.tags || []).join(
-        " "
-      )}`.toLowerCase();
-      return hay.includes(s);
-    });
-  }, [
-    items,
-    topTab,
-    itemsView,
-    selectedFolderId,
-    selectedBox,
-    selectedTag,
-    q,
-    searchFilter,
-  ]);
-
-  const showFab = topTab !== "menu"; // keep it clean on Menu
+  const showFab = topTab !== "menu";
 
   return (
     <main
@@ -325,18 +365,15 @@ export default function InventoryPage() {
         fontFamily: "system-ui",
       }}
     >
-      {/* Page container (mobile-friendly width) */}
+      {/* Page container */}
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "16px 14px 110px" }}>
         {/* Header */}
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             <h1 style={{ margin: 0, fontSize: 22, letterSpacing: "-0.3px" }}>Cozy Stash</h1>
-            <div style={{ fontSize: 12, color: THEME.muted }}>
-              Home inventory, but calm.
-            </div>
+            <div style={{ fontSize: 12, color: THEME.muted }}>Home inventory, but calm.</div>
           </div>
 
-          {/* Keep sign out tucked here (still accessible) */}
           <button onClick={signOut} style={styles.primaryBtn}>
             Sign Out
           </button>
@@ -347,9 +384,15 @@ export default function InventoryPage() {
           <section style={styles.surfaceCard}>
             <h2 style={{ marginTop: 0, marginBottom: 8 }}>Menu</h2>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button onClick={loadItems} style={styles.secondaryBtn}>Refresh items</button>
-              <button onClick={loadFolders} style={styles.secondaryBtn}>Refresh folders</button>
-              <button onClick={() => setIsAddOpen(true)} style={styles.primaryBtn}>+ Add item</button>
+              <button onClick={loadItems} style={styles.secondaryBtn}>
+                Refresh items
+              </button>
+              <button onClick={loadFolders} style={styles.secondaryBtn}>
+                Refresh folders
+              </button>
+              <button onClick={() => setIsAddOpen(true)} style={styles.primaryBtn}>
+                + Add item
+              </button>
             </div>
             <p style={{ marginTop: 12, fontSize: 13, color: THEME.muted }}>
               Add later: export, backup, settings, theme toggle, etc.
@@ -363,14 +406,29 @@ export default function InventoryPage() {
             <div style={styles.surfaceCard}>
               <h2 style={{ marginTop: 0, marginBottom: 10 }}>Search</h2>
 
-              {/* Quick filters */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                <Pill active={searchFilter === "all"} onClick={() => setSearchFilter("all")}>All</Pill>
-                <Pill active={searchFilter === "recent"} onClick={() => setSearchFilter("recent")}>Recently added</Pill>
-                <Pill active={searchFilter === "unfiled"} onClick={() => setSearchFilter("unfiled")}>Unfiled</Pill>
-                <Pill active={searchFilter === "photos"} onClick={() => setSearchFilter("photos")}>Has photos</Pill>
-                <Pill active={searchFilter === "hasbox"} onClick={() => setSearchFilter("hasbox")}>Has box</Pill>
-                <button onClick={() => { setSearchFilter("all"); setQ(""); }} style={styles.linkBtn}>
+                <Pill active={searchFilter === "all"} onClick={() => setSearchFilter("all")}>
+                  All
+                </Pill>
+                <Pill active={searchFilter === "recent"} onClick={() => setSearchFilter("recent")}>
+                  Recently added
+                </Pill>
+                <Pill active={searchFilter === "unfiled"} onClick={() => setSearchFilter("unfiled")}>
+                  Unfiled
+                </Pill>
+                <Pill active={searchFilter === "photos"} onClick={() => setSearchFilter("photos")}>
+                  Has photos
+                </Pill>
+                <Pill active={searchFilter === "hasbox"} onClick={() => setSearchFilter("hasbox")}>
+                  Has box
+                </Pill>
+                <button
+                  onClick={() => {
+                    setSearchFilter("all");
+                    setQ("");
+                  }}
+                  style={styles.linkBtn}
+                >
                   Clear
                 </button>
               </div>
@@ -388,16 +446,7 @@ export default function InventoryPage() {
 
             <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
               {visibleItems.map((it) => (
-                <ItemCard
-                  key={it.id}
-                  item={it}
-                  folders={folders}
-                  folderNameById={folderNameById}
-                  getSignedUrl={getSignedUrl}
-                  onMove={moveItem}
-                  onQty={updateQuantity}
-                  onDelete={deleteItem}
-                />
+                <ItemRow key={it.id} item={it} getSignedUrl={getSignedUrl} onOpen={() => setActiveItem(it)} />
               ))}
               {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No results.</p>}
             </div>
@@ -407,159 +456,139 @@ export default function InventoryPage() {
         {/* ITEMS TAB */}
         {topTab === "items" && (
           <>
-            {/* Search bar at top of Items */}
-            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search your stash…"
-                style={styles.input}
-              />
-
-              {/* Nested tabs (All / Folders / Boxes / Tags) */}
-              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-                <SubTab active={itemsView === "all"} onClick={() => setItemsView("all")}>All</SubTab>
-                <SubTab active={itemsView === "folders"} onClick={() => setItemsView("folders")}>Folders</SubTab>
-                <SubTab active={itemsView === "boxes"} onClick={() => setItemsView("boxes")}>Boxes</SubTab>
-                <SubTab active={itemsView === "tags"} onClick={() => setItemsView("tags")}>Tags</SubTab>
-                <button onClick={loadItems} style={{ ...styles.secondaryBtn, padding: "10px 12px" }}>
-                  Refresh
-                </button>
-              </div>
+            {/* Nested tabs row (NO search box on Items page) */}
+            <div style={{ marginTop: 14, display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+              <SubTab active={itemsView === "all"} onClick={() => setItemsView("all")}>
+                All
+              </SubTab>
+              <SubTab active={itemsView === "folders"} onClick={() => setItemsView("folders")}>
+                Folders
+              </SubTab>
+              <SubTab active={itemsView === "boxes"} onClick={() => setItemsView("boxes")}>
+                Boxes
+              </SubTab>
+              <SubTab active={itemsView === "tags"} onClick={() => setItemsView("tags")}>
+                Tags
+              </SubTab>
+              <button onClick={loadItems} style={{ ...styles.secondaryBtn, padding: "10px 12px" }}>
+                Refresh
+              </button>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: itemsView === "folders" ? "260px 1fr" : "1fr",
-                gap: 14,
-                marginTop: 14,
-              }}
-            >
-              {/* Folders sidebar only in folders view */}
+            {/* Main content area */}
+            <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+              {/* FOLDERS VIEW: only folders list (no items) */}
               {itemsView === "folders" && (
-                <aside style={styles.surfaceCard}>
-                  <h3 style={{ marginTop: 0, marginBottom: 10 }}>Folders</h3>
+                <section>
+                  {/* Create folder */}
+                  <div style={styles.surfaceCard}>
+                    <h3 style={{ marginTop: 0, marginBottom: 10 }}>Folders</h3>
 
-                  <button
-                    onClick={() => setSelectedFolderId("all")}
-                    style={{
-                      ...styles.sidebarBtn,
-                      fontWeight: selectedFolderId === "all" ? 900 : 700,
-                      background: selectedFolderId === "all" ? THEME.accentSoft : THEME.card,
-                      borderColor: selectedFolderId === "all" ? THEME.accent : THEME.border,
-                      color: THEME.text,
-                    }}
-                  >
-                    All folders
-                  </button>
+                    <form onSubmit={createFolder} style={{ display: "grid", gap: 8 }}>
+                      <input
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        placeholder="New folder name"
+                        style={styles.input}
+                      />
+                      <button style={styles.secondaryBtn}>Create folder</button>
+                      {folderStatus && <div style={{ fontSize: 13, color: THEME.muted }}>{folderStatus}</div>}
+                    </form>
+                  </div>
 
-                  {folders.map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => setSelectedFolderId(f.id)}
-                      style={{
-                        ...styles.sidebarBtn,
-                        fontWeight: selectedFolderId === f.id ? 900 : 700,
-                        background: selectedFolderId === f.id ? THEME.accentSoft : THEME.card,
-                        borderColor: selectedFolderId === f.id ? THEME.accent : THEME.border,
-                        color: THEME.text,
-                      }}
-                    >
-                      {f.name}
-                    </button>
-                  ))}
+                  {/* Folder cards */}
+                  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+                    {folders.map((f) => (
+                      <FolderCard
+                        key={f.id}
+                        folder={f}
+                        count={folderCounts.get(f.id) || 0}
+                        thumbPaths={folderThumbPaths.get(f.id) || []}
+                        getSignedUrl={getSignedUrl}
+                        onOpen={() => setActiveFolderId(f.id)}
+                      />
+                    ))}
 
-                  <hr style={{ margin: "12px 0", border: "none", borderTop: `1px solid ${THEME.border}` }} />
-
-                  <form onSubmit={createFolder} style={{ display: "grid", gap: 8 }}>
-                    <input
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="New folder name"
-                      style={styles.input}
-                    />
-                    <button style={styles.secondaryBtn}>Create folder</button>
-                    {folderStatus && <div style={{ fontSize: 13, color: THEME.muted }}>{folderStatus}</div>}
-                  </form>
-                </aside>
+                    {!folders.length && <p style={{ color: THEME.muted, margin: 0 }}>No folders yet.</p>}
+                  </div>
+                </section>
               )}
 
-              {/* Main items panel */}
-              <section>
-                {/* Boxes selector */}
-                {itemsView === "boxes" && !selectedBox && (
-                  <div style={styles.surfaceCard}>
-                    <h2 style={{ marginTop: 0, marginBottom: 10 }}>Boxes</h2>
-                    {boxes.length === 0 ? (
-                      <p style={{ color: THEME.muted, margin: 0 }}>No box identifiers yet.</p>
-                    ) : (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {boxes.map((b) => (
-                          <Pill key={b} active={false} onClick={() => setSelectedBox(b)}>
-                            {b}
-                          </Pill>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Tags selector */}
-                {itemsView === "tags" && !selectedTag && (
-                  <div style={styles.surfaceCard}>
-                    <h2 style={{ marginTop: 0, marginBottom: 10 }}>Tags</h2>
-                    {tags.length === 0 ? (
-                      <p style={{ color: THEME.muted, margin: 0 }}>No tags yet.</p>
-                    ) : (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {tags.map((t) => (
-                          <Pill key={t} active={false} onClick={() => setSelectedTag(t)}>
-                            {t}
-                          </Pill>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {(selectedBox || selectedTag) && (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <button
-                      onClick={() => {
-                        setSelectedBox(null);
-                        setSelectedTag(null);
-                        setQ("");
-                      }}
-                      style={styles.secondaryBtn}
-                    >
-                      ← Back
-                    </button>
-                    <div style={{ fontWeight: 900 }}>
-                      {selectedBox ? `Box: ${selectedBox}` : ""}
-                      {selectedTag ? `Tag: ${selectedTag}` : ""}
+              {/* NON-FOLDERS VIEWS: items list */}
+              {itemsView !== "folders" && (
+                <section>
+                  {/* Boxes selector */}
+                  {itemsView === "boxes" && !selectedBox && (
+                    <div style={styles.surfaceCard}>
+                      <h2 style={{ marginTop: 0, marginBottom: 10 }}>Boxes</h2>
+                      {boxes.length === 0 ? (
+                        <p style={{ color: THEME.muted, margin: 0 }}>No box identifiers yet.</p>
+                      ) : (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {boxes.map((b) => (
+                            <Pill key={b} active={false} onClick={() => setSelectedBox(b)}>
+                              {b}
+                            </Pill>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div />
-                  </div>
-                )}
+                  )}
 
-                {/* Items list */}
-                <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-                  {visibleItems.map((it) => (
-                    <ItemCard
-                      key={it.id}
-                      item={it}
-                      folders={folders}
-                      folderNameById={folderNameById}
-                      getSignedUrl={getSignedUrl}
-                      onMove={moveItem}
-                      onQty={updateQuantity}
-                      onDelete={deleteItem}
-                    />
-                  ))}
-                  {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>}
-                </div>
-              </section>
+                  {/* Tags selector */}
+                  {itemsView === "tags" && !selectedTag && (
+                    <div style={styles.surfaceCard}>
+                      <h2 style={{ marginTop: 0, marginBottom: 10 }}>Tags</h2>
+                      {tags.length === 0 ? (
+                        <p style={{ color: THEME.muted, margin: 0 }}>No tags yet.</p>
+                      ) : (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {tags.map((t) => (
+                            <Pill key={t} active={false} onClick={() => setSelectedTag(t)}>
+                              {t}
+                            </Pill>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Back header for boxes/tags selected */}
+                  {(selectedBox || selectedTag) && (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <button
+                        onClick={() => {
+                          setSelectedBox(null);
+                          setSelectedTag(null);
+                        }}
+                        style={styles.secondaryBtn}
+                      >
+                        ← Back
+                      </button>
+                      <div style={{ fontWeight: 900 }}>
+                        {selectedBox ? `Box: ${selectedBox}` : ""}
+                        {selectedTag ? `Tag: ${selectedTag}` : ""}
+                      </div>
+                      <div />
+                    </div>
+                  )}
+
+                  {/* Items list (compact rows) */}
+                  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+                    {visibleItems.map((it) => (
+                      <ItemRow key={it.id} item={it} getSignedUrl={getSignedUrl} onOpen={() => setActiveItem(it)} />
+                    ))}
+                    {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>}
+                  </div>
+                </section>
+              )}
             </div>
           </>
         )}
@@ -567,11 +596,7 @@ export default function InventoryPage() {
 
       {/* Floating Action Button (FAB) */}
       {showFab && (
-        <button
-          onClick={() => setIsAddOpen(true)}
-          aria-label="Add item"
-          style={styles.fab}
-        >
+        <button onClick={() => setIsAddOpen(true)} aria-label="Add item" style={styles.fab}>
           +
         </button>
       )}
@@ -581,16 +606,12 @@ export default function InventoryPage() {
         active={topTab}
         onChange={(tab) => {
           setTopTab(tab);
-          if (tab === "search") {
-            // keep search state, but reset quick filter to “all” if you want:
-            // setSearchFilter("all");
-          }
         }}
       />
 
-      {/* ADD ITEM MODAL */}
+      {/* ADD ITEM (bottom sheet) */}
       {isAddOpen && (
-        <Modal
+        <BottomSheetModal
           title="Add item"
           onClose={() => {
             setIsAddOpen(false);
@@ -670,14 +691,38 @@ export default function InventoryPage() {
 
             {status && <p style={{ margin: 0, color: THEME.muted }}>{status}</p>}
           </form>
-        </Modal>
+        </BottomSheetModal>
+      )}
+
+      {/* FOLDER ITEMS (bottom sheet) */}
+      {activeFolderId && (
+        <FolderItemsSheet
+          folderName={folderNameById.get(activeFolderId) || "Folder"}
+          items={activeFolderItems}
+          getSignedUrl={getSignedUrl}
+          onClose={() => setActiveFolderId(null)}
+          onOpenItem={(it) => setActiveItem(it)}
+        />
+      )}
+
+      {/* ITEM DETAILS (bottom sheet) */}
+      {activeItem && (
+        <ItemDetailsSheet
+          item={activeItem}
+          folders={folders}
+          folderNameById={folderNameById}
+          getSignedUrl={getSignedUrl}
+          onClose={() => setActiveItem(null)}
+          onDelete={deleteItem}
+          onMove={moveItem}
+        />
       )}
     </main>
   );
 }
 
 /* =========================
-   UI Components
+   Components
 ========================= */
 
 function BottomNav({ active, onChange }) {
@@ -714,7 +759,7 @@ function NavBtn({ active, onClick, icon, label }) {
         placeItems: "center",
         gap: 4,
         padding: "8px 8px",
-        borderRadius: 14,
+        borderRadius: 12,
         border: `1px solid ${active ? THEME.accentSoft : "transparent"}`,
         background: active ? THEME.accentSoft : "transparent",
         color: active ? THEME.text : THEME.muted,
@@ -733,10 +778,10 @@ function SubTab({ active, onClick, children }) {
     <button
       onClick={onClick}
       style={{
-        padding: "10px 14px",
-        borderRadius: 999,
+        padding: "10px 12px",
+        borderRadius: 10, // less bubbly
         border: `1px solid ${active ? THEME.accent : THEME.border}`,
-        fontWeight: 900,
+        fontWeight: 950,
         background: active ? THEME.accent : THEME.card,
         color: active ? "white" : THEME.text,
         boxShadow: active ? THEME.shadow : "none",
@@ -755,7 +800,7 @@ function Pill({ active, onClick, children }) {
       onClick={onClick}
       style={{
         padding: "8px 12px",
-        borderRadius: 999,
+        borderRadius: 10, // less bubbly
         border: `1px solid ${active ? THEME.accent : THEME.border}`,
         fontWeight: 900,
         background: active ? THEME.accentSoft : THEME.card,
@@ -769,7 +814,112 @@ function Pill({ active, onClick, children }) {
   );
 }
 
-function Modal({ title, onClose, children }) {
+/* Compact list row: thumbnail right + name + first tag (plain text) */
+function ItemRow({ item, getSignedUrl, onOpen }) {
+  const [thumb, setThumb] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      const first = (item.item_photos || [])[0]?.path;
+      if (!first) return;
+      const url = await getSignedUrl(first);
+      if (alive) setThumb(url || "");
+    }
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [item, getSignedUrl]);
+
+  const tag = (item.tags || [])[0] || "";
+
+  return (
+    <button onClick={onOpen} style={compact.cardBtn}>
+      <div style={{ minWidth: 0 }}>
+        <div style={compact.title}>{item.name}</div>
+        {tag ? <div style={compact.tagText}>{tag}</div> : <div style={compact.tagPlaceholder} />}
+      </div>
+
+      <div style={compact.thumbWrap}>
+        {thumb ? <img src={thumb} alt="" style={compact.thumbImg} /> : <div style={compact.thumbEmpty}>No Photo</div>}
+      </div>
+    </button>
+  );
+}
+
+// Folder card: icon stack (up to 3 thumbnails) + folder name + item count
+function FolderCard({ folder, count, thumbPaths, getSignedUrl, onOpen }) {
+  const [thumbs, setThumbs] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function run() {
+      if (!thumbPaths || thumbPaths.length === 0) {
+        if (alive) setThumbs([]);
+        return;
+      }
+      const signed = await Promise.all(thumbPaths.map(getSignedUrl));
+      if (alive) setThumbs(signed.filter(Boolean));
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [thumbPaths, getSignedUrl]);
+
+  return (
+    <button onClick={onOpen} style={folderUI.card}>
+      <div style={folderUI.left}>
+        {thumbs.length ? (
+          <div style={folderUI.stack}>
+            {thumbs.slice(0, 3).map((u, idx) => (
+              <img
+                key={u}
+                src={u}
+                alt=""
+                style={{
+                  ...folderUI.stackImg,
+                  transform: `translateX(${idx * 10}px)`,
+                  zIndex: 10 - idx,
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div style={folderUI.emptyIcon}>📁</div>
+        )}
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={folderUI.title}>{folder.name}</div>
+        <div style={folderUI.sub}>
+          {count} item{count === 1 ? "" : "s"}
+        </div>
+      </div>
+
+      <div style={folderUI.chev}>›</div>
+    </button>
+  );
+}
+
+function FolderItemsSheet({ folderName, items, getSignedUrl, onClose, onOpenItem }) {
+  return (
+    <BottomSheetModal title={folderName} onClose={onClose}>
+      <div style={{ display: "grid", gap: 12 }}>
+        {items.map((it) => (
+          <ItemRow key={it.id} item={it} getSignedUrl={getSignedUrl} onOpen={() => onOpenItem(it)} />
+        ))}
+        {!items.length && <p style={{ color: THEME.muted, margin: 0 }}>No items in this folder yet.</p>}
+      </div>
+    </BottomSheetModal>
+  );
+}
+
+/* Bottom-sheet modal (shared) */
+function BottomSheetModal({ title, onClose, children }) {
   return (
     <div
       onMouseDown={onClose}
@@ -778,40 +928,56 @@ function Modal({ title, onClose, children }) {
         inset: 0,
         background: "rgba(0,0,0,0.30)",
         backdropFilter: "blur(6px)",
+        zIndex: 80,
         display: "grid",
-        placeItems: "center",
-        padding: 14,
-        zIndex: 60,
+        alignItems: "end",
       }}
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
         style={{
-          width: "min(720px, 100%)",
+          width: "100%",
+          maxWidth: 760,
+          margin: "0 auto",
           background: THEME.card,
-          borderRadius: 18,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16,
           border: `1px solid ${THEME.border}`,
-          padding: 14,
+          borderBottom: "none",
           boxShadow: THEME.shadowStrong,
-          color: THEME.text,
+          padding: 14,
+          maxHeight: "82dvh",
+          overflow: "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <h2 style={{ margin: 0 }}>{title}</h2>
-          <button onClick={onClose} style={styles.secondaryBtn}>
-            Close
-          </button>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div
+            style={{
+              width: 54,
+              height: 5,
+              borderRadius: 999,
+              background: THEME.border,
+              margin: "2px auto 0",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+            <button onClick={onClose} style={styles.secondaryBtn}>
+              Close
+            </button>
+          </div>
         </div>
 
         <div style={{ marginTop: 12 }}>{children}</div>
+        <div style={{ height: "calc(10px + env(safe-area-inset-bottom))" }} />
       </div>
     </div>
   );
 }
 
-function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, onDelete }) {
+/* Item details sheet (all details on click) */
+function ItemDetailsSheet({ item, folders, folderNameById, getSignedUrl, onClose, onDelete, onMove }) {
   const [urls, setUrls] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -826,134 +992,140 @@ function ItemCard({ item, folders, folderNameById, getSignedUrl, onMove, onQty, 
     };
   }, [item, getSignedUrl]);
 
-  const folderName = item.folder_id ? (folderNameById.get(item.folder_id) || "Folder") : "Unfiled";
-  const hasTags = (item.tags || []).length > 0;
+  const folderName = item.folder_id ? folderNameById.get(item.folder_id) || "Folder" : "Unfiled";
 
   return (
-    <div style={ui.card}>
-      {/* Header */}
-      <div style={ui.rowBetween}>
-        <div style={{ minWidth: 0 }}>
-          <div style={ui.title}>{item.name}</div>
-          <div style={ui.metaRow}>
-            <PillSmall tone="soft">{folderName}</PillSmall>
-            {item.box_identifier ? <PillSmall tone="soft">Box: {item.box_identifier}</PillSmall> : null}
-            {hasTags ? (
-              <PillSmall tone="accent">
-                {item.tags.slice(0, 2).join(" • ")}
-                {item.tags.length > 2 ? " +" : ""}
-              </PillSmall>
-            ) : null}
+    <BottomSheetModal title={item.name} onClose={onClose}>
+      <div style={{ display: "grid", gap: 12 }}>
+        {urls.length > 0 ? (
+          <img
+            src={urls[0]}
+            alt=""
+            style={{
+              width: "100%",
+              height: 260,
+              objectFit: "cover",
+              borderRadius: 12,
+              border: `1px solid ${THEME.border}`,
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: 180,
+              borderRadius: 12,
+              border: `1px solid ${THEME.border}`,
+              background: "#FAF7F2",
+              display: "grid",
+              placeItems: "center",
+              color: THEME.muted,
+              fontWeight: 900,
+            }}
+          >
+            No photos yet
           </div>
-        </div>
+        )}
 
-        {/* Kebab menu */}
-        <div style={{ position: "relative" }}>
-          <button onClick={() => setMenuOpen((v) => !v)} style={ui.kebabBtn} aria-label="Item menu">
-            ⋯
-          </button>
-
-          {menuOpen && (
-            <div style={ui.menu}>
-              <button
-                style={{ ...ui.menuItem, color: "#8B2E2E" }}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete(item.id);
+        {(item.tags || []).length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {item.tags.map((t) => (
+              <span
+                key={t}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: `1px solid ${THEME.border}`,
+                  background: "#FAF7F2",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  color: THEME.text,
                 }}
               >
-                Delete
-              </button>
-              <div style={ui.menuDivider} />
-              <div style={{ padding: 10 }}>
-                <div style={{ fontSize: 12, color: THEME.muted, marginBottom: 6 }}>Move to folder</div>
-                <select
-                  value={item.folder_id || "none"}
-                  onChange={(e) => {
-                    onMove(item.id, e.target.value);
-                    setMenuOpen(false);
-                  }}
-                  style={ui.select}
-                >
-                  <option value="none">No folder</option>
-                  {folders.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 8, color: THEME.text }}>
+          <div>
+            <b>Folder:</b> {folderName}
+          </div>
+          <div>
+            <b>Quantity:</b> {item.quantity || 1}
+          </div>
+          {item.box_identifier ? (
+            <div>
+              <b>Box:</b> {item.box_identifier}
             </div>
-          )}
+          ) : null}
+          {item.notes ? (
+            <div>
+              <b>Notes:</b> {item.notes}
+            </div>
+          ) : null}
         </div>
-      </div>
 
-      {/* Notes */}
-      {item.notes ? <div style={ui.notes}>{item.notes}</div> : null}
-
-      {/* Photos */}
-      {urls.length > 0 && (
-        <div style={ui.photoWrap}>
-          {urls.slice(0, 4).map((u) => (
-            <img
-              key={u}
-              src={u}
-              alt=""
-              style={{
-                ...ui.photo,
-                width: urls.length === 1 ? "100%" : "calc(50% - 6px)",
-                height: urls.length === 1 ? 220 : 130,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Footer controls */}
-      <div style={ui.footer}>
-        <div style={ui.qtyWrap}>
-          <button
-            onClick={() => onQty(item.id, (item.quantity || 1) - 1)}
-            style={ui.qtyBtn}
-            aria-label="Decrease quantity"
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+          <select
+            value={item.folder_id || "none"}
+            onChange={(e) => onMove(item.id, e.target.value)}
+            style={{
+              flex: 1,
+              minWidth: 220,
+              padding: 12,
+              borderRadius: 12,
+              border: `1px solid ${THEME.border}`,
+              background: THEME.card,
+              color: THEME.text,
+              fontWeight: 900,
+            }}
           >
-            −
-          </button>
-          <div style={ui.qtyValue}>{item.quantity || 1}</div>
+            <option value="none">No folder</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+
           <button
-            onClick={() => onQty(item.id, (item.quantity || 1) + 1)}
-            style={ui.qtyBtn}
-            aria-label="Increase quantity"
+            onClick={() => onDelete(item.id)}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid #8B2E2E",
+              background: "#8B2E2E",
+              color: "white",
+              fontWeight: 950,
+              cursor: "pointer",
+            }}
           >
-            +
+            Delete
           </button>
         </div>
 
-        <div style={{ fontSize: 12, color: THEME.muted }}>Tap ⋯ for move/delete</div>
+        {urls.length > 1 && (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {urls.slice(1, 5).map((u) => (
+              <img
+                key={u}
+                src={u}
+                alt=""
+                style={{
+                  width: "calc(50% - 5px)",
+                  height: 130,
+                  objectFit: "cover",
+                  borderRadius: 12,
+                  border: `1px solid ${THEME.border}`,
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function PillSmall({ children, tone = "soft" }) {
-  const isAccent = tone === "accent";
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: `1px solid ${isAccent ? THEME.accent : THEME.border}`,
-        background: isAccent ? THEME.accentSoft : "#FAF7F2",
-        color: THEME.text,
-        fontSize: 12,
-        fontWeight: 900,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
+    </BottomSheetModal>
   );
 }
 
@@ -961,16 +1133,21 @@ function PillSmall({ children, tone = "soft" }) {
    Styles
 ========================= */
 
-const ui = {
-  card: {
-    border: `1px solid ${THEME.border}`,
-    borderRadius: 18,
+const compact = {
+  cardBtn: {
+    width: "100%",
+    textAlign: "left",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
     padding: 14,
+    borderRadius: 12,
+    border: `1px solid ${THEME.border}`,
     background: THEME.card,
-    color: THEME.text,
     boxShadow: THEME.shadow,
+    cursor: "pointer",
   },
-  rowBetween: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
   title: {
     fontSize: 16,
     fontWeight: 950,
@@ -980,79 +1157,110 @@ const ui = {
     whiteSpace: "nowrap",
     letterSpacing: "-0.2px",
   },
-  metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
-  notes: { marginTop: 10, fontSize: 13, lineHeight: 1.35, color: THEME.muted },
-
-  photoWrap: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 },
-  photo: { borderRadius: 16, objectFit: "cover", border: `1px solid ${THEME.border}` },
-
-  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 10 },
-
-  qtyWrap: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    border: `1px solid ${THEME.border}`,
-    borderRadius: 999,
-    padding: "6px 10px",
-    background: "#FAF7F2",
+  // plain text tag (not a bubble)
+  tagText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: THEME.muted,
+    fontWeight: 700,
   },
-  qtyBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    border: `1px solid ${THEME.border}`,
-    background: THEME.card,
-    color: THEME.text,
-    fontSize: 18,
-    fontWeight: 950,
-    cursor: "pointer",
+  tagPlaceholder: {
+    marginTop: 8,
+    height: 22,
   },
-  qtyValue: { minWidth: 24, textAlign: "center", fontWeight: 950, color: THEME.text },
-
-  kebabBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
+  thumbWrap: {
+    flex: "0 0 auto",
+    width: 70,
+    height: 70,
+    borderRadius: 12,
     border: `1px solid ${THEME.border}`,
-    background: THEME.card,
-    color: THEME.text,
-    fontSize: 22,
-    fontWeight: 950,
-    cursor: "pointer",
-  },
-
-  menu: {
-    position: "absolute",
-    right: 0,
-    top: 44,
-    width: 230,
-    background: THEME.card,
-    border: `1px solid ${THEME.border}`,
-    borderRadius: 16,
-    boxShadow: THEME.shadowStrong,
     overflow: "hidden",
-    zIndex: 80,
+    background: "#FAF7F2",
+    display: "grid",
+    placeItems: "center",
   },
-  menuItem: {
+  thumbImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  thumbEmpty: {
+    fontSize: 11,
+    color: THEME.muted,
+    padding: 6,
+    textAlign: "center",
+    fontWeight: 800,
+  },
+};
+
+const folderUI = {
+  card: {
     width: "100%",
     textAlign: "left",
-    padding: 12,
-    background: "transparent",
-    border: "none",
-    fontWeight: 950,
-    cursor: "pointer",
-  },
-  menuDivider: { height: 1, background: THEME.border },
-
-  select: {
-    width: "100%",
-    padding: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
     borderRadius: 12,
     border: `1px solid ${THEME.border}`,
     background: THEME.card,
+    boxShadow: THEME.shadow,
+    cursor: "pointer",
+  },
+  left: {
+    width: 56,
+    height: 56,
+    display: "grid",
+    placeItems: "center",
+    flex: "0 0 auto",
+  },
+  stack: {
+    position: "relative",
+    width: 56,
+    height: 56,
+  },
+  stackImg: {
+    position: "absolute",
+    top: 6,
+    left: 0,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    objectFit: "cover",
+    border: `1px solid ${THEME.border}`,
+    background: "#FAF7F2",
+  },
+  emptyIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    border: `1px solid ${THEME.border}`,
+    background: "#FAF7F2",
+    display: "grid",
+    placeItems: "center",
+    fontSize: 18,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 950,
     color: THEME.text,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  sub: {
+    marginTop: 6,
+    fontSize: 13,
+    color: THEME.muted,
+    fontWeight: 700,
+  },
+  chev: {
+    marginLeft: "auto",
+    fontSize: 22,
+    color: THEME.muted,
     fontWeight: 900,
+    lineHeight: 1,
   },
 };
 
@@ -1060,14 +1268,14 @@ const styles = {
   surfaceCard: {
     marginTop: 16,
     border: `1px solid ${THEME.border}`,
-    borderRadius: 18,
+    borderRadius: 12,
     padding: 14,
     background: THEME.card,
     boxShadow: THEME.shadow,
   },
   input: {
     padding: 12,
-    borderRadius: 14,
+    borderRadius: 12,
     border: `1px solid ${THEME.border}`,
     background: THEME.card,
     color: THEME.text,
@@ -1076,7 +1284,7 @@ const styles = {
   },
   primaryBtn: {
     padding: "10px 14px",
-    borderRadius: 14,
+    borderRadius: 12,
     border: `1px solid ${THEME.accent}`,
     background: THEME.accent,
     color: "white",
@@ -1085,7 +1293,7 @@ const styles = {
   },
   secondaryBtn: {
     padding: "10px 14px",
-    borderRadius: 14,
+    borderRadius: 12,
     border: `1px solid ${THEME.border}`,
     background: "#FAF7F2",
     color: THEME.text,
@@ -1102,20 +1310,10 @@ const styles = {
     textDecoration: "underline",
     cursor: "pointer",
   },
-  sidebarBtn: {
-    width: "100%",
-    textAlign: "left",
-    padding: 10,
-    marginBottom: 8,
-    borderRadius: 14,
-    border: `1px solid ${THEME.border}`,
-    background: THEME.card,
-    cursor: "pointer",
-  },
   fab: {
     position: "fixed",
     right: 16,
-    bottom: 84, // above bottom nav
+    bottom: 84,
     width: 62,
     height: 62,
     borderRadius: "50%",
