@@ -40,7 +40,8 @@ export default function InventoryPage() {
   const [activeItem, setActiveItem] = useState(null);
 
   // Folder items sheet (tap a folder)
-  const [activeFolderId, setActiveFolderId] = useState(null);
+  const [folderPath, setFolderPath] = useState([]); // stack of folder ids
+const currentFolderId = folderPath.length ? folderPath[folderPath.length - 1] : null;
 
   // Data
   const [folders, setFolders] = useState([]);
@@ -67,6 +68,10 @@ export default function InventoryPage() {
   const [files, setFiles] = useState([]);
   const [status, setStatus] = useState("");
 
+const [fabOpen, setFabOpen] = useState(false);
+const [itemsLayout, setItemsLayout] = useState("list"); // list | photos
+ const [isDesktop, setIsDesktop] = useState(false);
+
   // Protect page
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -85,7 +90,7 @@ export default function InventoryPage() {
   async function loadFolders() {
     const { data, error } = await supabase
       .from("folders")
-      .select("id, name")
+      .select("id, name, parent_id")
       .order("name", { ascending: true });
 
     if (!error) setFolders(data || []);
@@ -108,30 +113,42 @@ export default function InventoryPage() {
     loadItems();
   }, [session]);
 
+useEffect(() => {
+  const mq = window.matchMedia("(min-width: 900px)");
+
+  const update = () => setIsDesktop(mq.matches);
+
+  update(); // run on mount
+  mq.addEventListener("change", update);
+
+  return () => mq.removeEventListener("change", update);
+}, []);
+
   // switching tabs resets deep selection states
-  useEffect(() => {
-    setSelectedBox(null);
-    setSelectedTag(null);
+useEffect(() => {
+  setSelectedBox(null);
+  setSelectedTag(null);
 
-    // keep search scoped to Search tab
-    if (topTab !== "search") {
-      setSearchFilter("all");
-      setQ("");
-    }
+  // keep search scoped to Search tab
+  if (topTab !== "search") {
+    setSearchFilter("all");
+    setQ("");
+  }
 
-    // close sheets when switching main tabs
-    setActiveItem(null);
-    setActiveFolderId(null);
-  }, [topTab]);
+  // close sheets when switching main tabs
+  setActiveItem(null);
+  setFolderPath([]); // replaces activeFolderId
+  setFabOpen(false);
+}, [topTab]);
 
-  // switching nested Items tabs resets selection
-  useEffect(() => {
-    setSelectedBox(null);
-    setSelectedTag(null);
+// switching nested Items tabs resets selection
+useEffect(() => {
+  setSelectedBox(null);
+  setSelectedTag(null);
 
-    // when leaving folders view, close any folder sheet
-    if (itemsView !== "folders") setActiveFolderId(null);
-  }, [itemsView]);
+  // when leaving folders view, reset folder navigation
+  if (itemsView !== "folders") setFolderPath([]);
+}, [itemsView]);
 
   function parseTags(text) {
     return text
@@ -263,6 +280,19 @@ export default function InventoryPage() {
     return map;
   }, [folders]);
 
+const childFolders = useMemo(() => {
+  // When at root, show parent_id === null
+  return folders
+    .filter((f) => (currentFolderId ? f.parent_id === currentFolderId : !f.parent_id))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}, [folders, currentFolderId]);
+
+const currentFolderItems = useMemo(() => {
+  // If no folder selected, show nothing (Folders tab should show folders list)
+  if (!currentFolderId) return [];
+  return items.filter((it) => it.folder_id === currentFolderId);
+}, [items, currentFolderId]);
+
   const boxes = useMemo(() => {
     const set = new Set();
     items.forEach((it) => it.box_identifier && set.add(it.box_identifier));
@@ -302,10 +332,6 @@ export default function InventoryPage() {
     return map;
   }, [items]);
 
-  const activeFolderItems = useMemo(() => {
-    if (!activeFolderId) return [];
-    return items.filter((it) => it.folder_id === activeFolderId);
-  }, [items, activeFolderId]);
 
   const visibleItems = useMemo(() => {
     let list = items;
@@ -370,13 +396,26 @@ export default function InventoryPage() {
         {/* Header */}
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
-            <h1 style={{ margin: 0, fontSize: 22, letterSpacing: "-0.3px" }}>Cozy Stash</h1>
-            <div style={{ fontSize: 12, color: THEME.muted }}>Home inventory, but calm.</div>
-          </div>
+  <h1
+    style={{
+      margin: 0,
+      fontSize: 30,
+      fontWeight: 950,
+      letterSpacing: "-0.6px",
+      lineHeight: 1.05,
+    }}
+  >
+    Cozy Stash
+  </h1>
+  <div style={{ fontSize: 12, color: THEME.muted, fontWeight: 700 }}>
+    Home inventory, but calm.
+  </div>
+</div>
 
-          <button onClick={signOut} style={styles.primaryBtn}>
-            Sign Out
-          </button>
+<button onClick={signOut} style={styles.signOutBtn}>
+  Sign out
+</button>
+       
         </header>
 
         {/* MENU TAB */}
@@ -436,7 +475,7 @@ export default function InventoryPage() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search name, tags, box, notes…"
+                placeholder="Search your stash..."
                 style={styles.input}
               />
               <p style={{ marginTop: 8, fontSize: 13, color: THEME.muted }}>
@@ -444,12 +483,66 @@ export default function InventoryPage() {
               </p>
             </div>
 
-            <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
-              {visibleItems.map((it) => (
-                <ItemRow key={it.id} item={it} getSignedUrl={getSignedUrl} onOpen={() => setActiveItem(it)} />
-              ))}
-              {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No results.</p>}
-            </div>
+            {/* Items renderer (All view supports list/cards/photos) */}
+{itemsView === "all" ? (
+  <>
+    {itemsLayout === "list" && (
+      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        {visibleItems.map((it) => (
+          <ItemRow
+            key={it.id}
+            item={it}
+            getSignedUrl={getSignedUrl}
+            onOpen={() => setActiveItem(it)}
+          />
+        ))}
+        {!visibleItems.length && (
+          <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+        )}
+      </div>
+    )}
+
+   
+
+    {itemsLayout === "photos" && (
+      <div
+  style={{
+    ...gridUI.grid,
+    gridTemplateColumns: isDesktop
+      ? "repeat(3, minmax(0, 1fr))"
+      : "repeat(2, minmax(0, 1fr))",
+  }}
+>
+        {visibleItems.map((it) => (
+          <ItemPhotoTile
+            key={it.id}
+            item={it}
+            getSignedUrl={getSignedUrl}
+            onOpen={() => setActiveItem(it)}
+          />
+        ))}
+        {!visibleItems.length && (
+          <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+        )}
+      </div>
+    )}
+  </>
+) : (
+  // For folders/boxes/tags view keep list layout
+  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+    {visibleItems.map((it) => (
+      <ItemRow
+        key={it.id}
+        item={it}
+        getSignedUrl={getSignedUrl}
+        onOpen={() => setActiveItem(it)}
+      />
+    ))}
+    {!visibleItems.length && (
+      <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+    )}
+  </div>
+)}
           </section>
         )}
 
@@ -457,7 +550,7 @@ export default function InventoryPage() {
         {topTab === "items" && (
           <>
             {/* Nested tabs row (NO search box on Items page) */}
-            <div style={{ marginTop: 14, display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+            <div style={{ marginTop: 14, display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, WebkitOverflowScrolling: "touch",}}>
               <SubTab active={itemsView === "all"} onClick={() => setItemsView("all")}>
                 All
               </SubTab>
@@ -475,11 +568,47 @@ export default function InventoryPage() {
               </button>
             </div>
 
+{/* Views toggle (only in All view) */}
+{itemsView === "all" && (
+  <div style={styles.segmentWrap2}>
+    <button
+      onClick={() => setItemsLayout("list")}
+      style={{
+        ...styles.segmentBtn,
+        ...(itemsLayout === "list" ? styles.segmentBtnActive : {}),
+      }}
+    >
+      List
+    </button>
+
+
+    <button
+      onClick={() => setItemsLayout("photos")}
+      style={{
+        ...styles.segmentBtn,
+        ...(itemsLayout === "photos" ? styles.segmentBtnActive : {}),
+      }}
+    >
+      Thumbnails
+    </button>
+  </div>
+)}
+
             {/* Main content area */}
             <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
               {/* FOLDERS VIEW: only folders list (no items) */}
               {itemsView === "folders" && (
                 <section>
+{currentFolderId && (
+  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+    <button onClick={() => setFolderPath((p) => p.slice(0, -1))} style={styles.secondaryBtn}>
+      ← Back
+    </button>
+    <div style={{ fontWeight: 950 }}>
+      {folderNameById.get(currentFolderId) || "Folder"}
+    </div>
+  </div>
+)}
                   {/* Create folder */}
                   <div style={styles.surfaceCard}>
                     <h3 style={{ marginTop: 0, marginBottom: 10 }}>Folders</h3>
@@ -498,18 +627,36 @@ export default function InventoryPage() {
 
                   {/* Folder cards */}
                   <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-                    {folders.map((f) => (
+                    {childFolders.map((f) => (
                       <FolderCard
                         key={f.id}
                         folder={f}
                         count={folderCounts.get(f.id) || 0}
                         thumbPaths={folderThumbPaths.get(f.id) || []}
                         getSignedUrl={getSignedUrl}
-                        onOpen={() => setActiveFolderId(f.id)}
+                        onOpen={() => setFolderPath((p) => [...p, f.id])}
                       />
                     ))}
 
+
                     {!folders.length && <p style={{ color: THEME.muted, margin: 0 }}>No folders yet.</p>}
+
+{currentFolderId && (
+  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+    {currentFolderItems.map((it) => (
+      <ItemRow
+        key={it.id}
+        item={it}
+        getSignedUrl={getSignedUrl}
+        onOpen={() => setActiveItem(it)}
+      />
+    ))}
+    {!currentFolderItems.length && (
+      <p style={{ color: THEME.muted, margin: 0 }}>No items in this folder yet.</p>
+    )}
+  </div>
+)}
+
                   </div>
                 </section>
               )}
@@ -580,13 +727,64 @@ export default function InventoryPage() {
                     </div>
                   )}
 
-                  {/* Items list (compact rows) */}
-                  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-                    {visibleItems.map((it) => (
-                      <ItemRow key={it.id} item={it} getSignedUrl={getSignedUrl} onOpen={() => setActiveItem(it)} />
-                    ))}
-                    {!visibleItems.length && <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>}
-                  </div>
+                  {/* Items list (All view supports list/thumbnails) */}
+{itemsView === "all" ? (
+  <>
+    {itemsLayout === "list" && (
+      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        {visibleItems.map((it) => (
+          <ItemRow
+            key={it.id}
+            item={it}
+            getSignedUrl={getSignedUrl}
+            onOpen={() => setActiveItem(it)}
+          />
+        ))}
+        {!visibleItems.length && (
+          <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+        )}
+      </div>
+    )}
+
+    {itemsLayout === "photos" && (
+      <div
+        style={{
+          ...gridUI.grid,
+          gridTemplateColumns: isDesktop
+            ? "repeat(3, minmax(0, 1fr))"
+            : "repeat(2, minmax(0, 1fr))",
+        }}
+      >
+        {visibleItems.map((it) => (
+          <ItemPhotoTile
+            key={it.id}
+            item={it}
+            getSignedUrl={getSignedUrl}
+            onOpen={() => setActiveItem(it)}
+          />
+        ))}
+        {!visibleItems.length && (
+          <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+        )}
+      </div>
+    )}
+  </>
+) : (
+  // Boxes / Tags results stay as list rows
+  <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+    {visibleItems.map((it) => (
+      <ItemRow
+        key={it.id}
+        item={it}
+        getSignedUrl={getSignedUrl}
+        onOpen={() => setActiveItem(it)}
+      />
+    ))}
+    {!visibleItems.length && (
+      <p style={{ color: THEME.muted, margin: 0 }}>No items found.</p>
+    )}
+  </div>
+)}
                 </section>
               )}
             </div>
@@ -596,10 +794,56 @@ export default function InventoryPage() {
 
       {/* Floating Action Button (FAB) */}
       {showFab && (
-        <button onClick={() => setIsAddOpen(true)} aria-label="Add item" style={styles.fab}>
-          +
-        </button>
-      )}
+  <>
+    {/* Dim overlay when speed dial is open */}
+    {fabOpen && (
+      <button
+        aria-label="Close actions"
+        onClick={() => setFabOpen(false)}
+        style={styles.fabOverlay}
+      />
+    )}
+
+    {/* Speed-dial actions */}
+    {fabOpen && (
+      <div style={styles.fabActions}>
+        <FabAction
+          label="Add item"
+          onClick={() => {
+            setFabOpen(false);
+            setIsAddOpen(true);
+          }}
+        />
+        <FabAction
+          label="Add folder"
+          onClick={() => {
+            setFabOpen(false);
+            setTopTab("items");
+            setItemsView("folders");
+            // scroll user to folder create area (optional)
+            // You already have create folder in folders view, so this just navigates there.
+          }}
+        />
+        <FabAction
+          label="Scan to add"
+          onClick={() => {
+            setFabOpen(false);
+            alert("Scan to add: coming next (Phase 3).");
+          }}
+        />
+      </div>
+    )}
+
+    {/* Main FAB */}
+    <button
+      onClick={() => setFabOpen((v) => !v)}
+      aria-label={fabOpen ? "Close actions" : "Open actions"}
+      style={{ ...styles.fab, transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)" }}
+    >
+      +
+    </button>
+  </>
+)}
 
       {/* Bottom Navigation */}
       <BottomNav
@@ -694,16 +938,6 @@ export default function InventoryPage() {
         </BottomSheetModal>
       )}
 
-      {/* FOLDER ITEMS (bottom sheet) */}
-      {activeFolderId && (
-        <FolderItemsSheet
-          folderName={folderNameById.get(activeFolderId) || "Folder"}
-          items={activeFolderItems}
-          getSignedUrl={getSignedUrl}
-          onClose={() => setActiveFolderId(null)}
-          onOpenItem={(it) => setActiveItem(it)}
-        />
-      )}
 
       {/* ITEM DETAILS (bottom sheet) */}
       {activeItem && (
@@ -727,25 +961,22 @@ export default function InventoryPage() {
 
 function BottomNav({ active, onChange }) {
   return (
-    <nav
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(255,255,255,0.92)",
-        backdropFilter: "blur(10px)",
-        borderTop: `1px solid ${THEME.border}`,
-        padding: "10px 10px calc(10px + env(safe-area-inset-bottom))",
-        zIndex: 40,
-      }}
-    >
-      <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", justifyContent: "space-around", gap: 10 }}>
-        <NavBtn active={active === "items"} onClick={() => onChange("items")} icon="🏠" label="Items" />
-        <NavBtn active={active === "search"} onClick={() => onChange("search")} icon="🔍" label="Search" />
-        <NavBtn active={active === "menu"} onClick={() => onChange("menu")} icon="☰" label="Menu" />
+    <nav style={styles.navWrap}>
+      <div style={styles.navDock}>
+        <NavBtnDock active={active === "items"} onClick={() => onChange("items")} icon="🏠" label="Items" />
+        <NavBtnDock active={active === "search"} onClick={() => onChange("search")} icon="🔍" label="Search" />
+        <NavBtnDock active={active === "menu"} onClick={() => onChange("menu")} icon="☰" label="Menu" />
       </div>
     </nav>
+  );
+}
+
+function NavBtnDock({ active, onClick, icon, label }) {
+  return (
+    <button onClick={onClick} style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
+      <div style={{ fontSize: 18, lineHeight: 1 }}>{icon}</div>
+      <div style={{ fontSize: 12, fontWeight: 900 }}>{label}</div>
+    </button>
   );
 }
 
@@ -778,15 +1009,15 @@ function SubTab({ active, onClick, children }) {
     <button
       onClick={onClick}
       style={{
-        padding: "10px 12px",
-        borderRadius: 10, // less bubbly
+        padding: "9px 12px",
+        borderRadius: 12, // chip-y but not pill
         border: `1px solid ${active ? THEME.accent : THEME.border}`,
         fontWeight: 950,
-        background: active ? THEME.accent : THEME.card,
+        background: active ? THEME.accent : "rgba(255,255,255,0.85)",
         color: active ? "white" : THEME.text,
-        boxShadow: active ? THEME.shadow : "none",
         cursor: "pointer",
         whiteSpace: "nowrap",
+        boxShadow: active ? THEME.shadow : "none",
       }}
     >
       {children}
@@ -800,16 +1031,24 @@ function Pill({ active, onClick, children }) {
       onClick={onClick}
       style={{
         padding: "8px 12px",
-        borderRadius: 10, // less bubbly
+        borderRadius: 12,
         border: `1px solid ${active ? THEME.accent : THEME.border}`,
         fontWeight: 900,
-        background: active ? THEME.accentSoft : THEME.card,
+        background: active ? THEME.accentSoft : "rgba(255,255,255,0.85)",
         color: THEME.text,
         cursor: "pointer",
         whiteSpace: "nowrap",
       }}
     >
       {children}
+    </button>
+  );
+}
+
+function FabAction({ label, onClick }) {
+  return (
+    <button onClick={onClick} style={styles.fabActionBtn}>
+      <span style={styles.fabActionLabel}>{label}</span>
     </button>
   );
 }
@@ -844,6 +1083,67 @@ function ItemRow({ item, getSignedUrl, onOpen }) {
       <div style={compact.thumbWrap}>
         {thumb ? <img src={thumb} alt="" style={compact.thumbImg} /> : <div style={compact.thumbEmpty}>No Photo</div>}
       </div>
+    </button>
+  );
+}
+
+function ItemCardGrid({ item, getSignedUrl, onOpen }) {
+  const [thumb, setThumb] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      const first = (item.item_photos || [])[0]?.path;
+      if (!first) return;
+      const url = await getSignedUrl(first);
+      if (alive) setThumb(url || "");
+    }
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [item, getSignedUrl]);
+
+  const tag = (item.tags || [])[0] || "";
+
+  return (
+    <button onClick={onOpen} style={gridUI.card}>
+      <div style={gridUI.media}>
+        {thumb ? (
+          <img src={thumb} alt="" style={gridUI.img} />
+        ) : (
+          <div style={gridUI.empty}>No Photo</div>
+        )}
+      </div>
+
+      <div style={gridUI.meta}>
+        <div style={gridUI.name}>{item.name}</div>
+        {tag ? <div style={gridUI.tag}>{tag}</div> : <div style={{ height: 18 }} />}
+      </div>
+    </button>
+  );
+}
+
+function ItemPhotoTile({ item, getSignedUrl, onOpen }) {
+  const [thumb, setThumb] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      const first = (item.item_photos || [])[0]?.path;
+      if (!first) return;
+      const url = await getSignedUrl(first);
+      if (alive) setThumb(url || "");
+    }
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [item, getSignedUrl]);
+
+  return (
+    <button onClick={onOpen} style={gridUI.photoTile}>
+      {thumb ? <img src={thumb} alt="" style={gridUI.photoImg} /> : <div style={gridUI.empty}>No Photo</div>}
     </button>
   );
 }
@@ -1264,6 +1564,88 @@ const folderUI = {
   },
 };
 
+const gridUI = {
+  grid: {
+    display: "grid",
+    gap: 12,
+    marginTop: 12,
+  },
+
+  card: {
+    textAlign: "left",
+    borderRadius: 12,
+    border: `1px solid ${THEME.border}`,
+    background: THEME.card,
+    boxShadow: THEME.shadow,
+    overflow: "hidden",
+    cursor: "pointer",
+    padding: 0,
+  },
+
+  media: {
+    width: "100%",
+    height: 140,
+    background: "#FAF7F2",
+    borderBottom: `1px solid ${THEME.border}`,
+    display: "grid",
+    placeItems: "center",
+  },
+
+  img: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+
+  empty: {
+    color: THEME.muted,
+    fontWeight: 900,
+    fontSize: 12,
+  },
+
+  meta: {
+    padding: 10,
+    display: "grid",
+    gap: 6,
+  },
+
+  name: {
+    fontSize: 14,
+    fontWeight: 950,
+    color: THEME.text,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  tag: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: THEME.muted,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  photoTile: {
+    borderRadius: 12,
+    border: `1px solid ${THEME.border}`,
+    background: "#FAF7F2",
+    overflow: "hidden",
+    cursor: "pointer",
+    padding: 0,
+    height: 180,
+  },
+
+  photoImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+};
+
 const styles = {
   surfaceCard: {
     marginTop: 16,
@@ -1313,7 +1695,7 @@ const styles = {
   fab: {
     position: "fixed",
     right: 16,
-    bottom: 84,
+    bottom: 120,
     width: 62,
     height: 62,
     borderRadius: "50%",
@@ -1326,4 +1708,149 @@ const styles = {
     zIndex: 55,
     cursor: "pointer",
   },
+
+// ---- Floating bottom nav (pill dock) ----
+navWrap: {
+  position: "fixed",
+  left: 0,
+  right: 0,
+  bottom: 0,
+  zIndex: 40,
+  padding: "10px 12px calc(10px + env(safe-area-inset-bottom))",
+  pointerEvents: "none", // allows clicks only on dock
+},
+
+navDock: {
+  pointerEvents: "auto",
+  maxWidth: 520,
+  margin: "0 auto",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 8,
+  padding: 8,
+  borderRadius: 18,
+  border: `1px solid ${THEME.border}`,
+  background: "rgba(255,255,255,0.92)",
+  backdropFilter: "blur(12px)",
+  boxShadow: THEME.shadowStrong,
+},
+
+navBtn: {
+  flex: 1,
+  display: "grid",
+  placeItems: "center",
+  gap: 4,
+  padding: "10px 10px",
+  borderRadius: 14,
+  border: "1px solid transparent",
+  background: "transparent",
+  color: THEME.muted,
+  cursor: "pointer",
+},
+
+navBtnActive: {
+  background: THEME.accentSoft,
+  border: `1px solid ${THEME.accentSoft}`,
+  color: THEME.text,
+},
+
+// ---- Speed dial FAB ----
+fabOverlay: {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.18)",
+  zIndex: 50,
+  border: "none",
+  padding: 0,
+  cursor: "pointer",
+},
+
+fabActions: {
+  position: "fixed",
+  right: 16,
+  bottom: 160, // sits above the dock
+  zIndex: 55,
+  display: "grid",
+  gap: 10,
+},
+
+fabActionBtn: {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 10,
+  padding: "10px 12px",
+  borderRadius: 14,
+  border: `1px solid ${THEME.border}`,
+  background: "rgba(255,255,255,0.92)",
+  backdropFilter: "blur(12px)",
+  boxShadow: THEME.shadowStrong,
+  cursor: "pointer",
+  width: "fit-content",
+  marginLeft: "auto",
+},
+
+fabActionLabel: {
+  fontSize: 13,
+  fontWeight: 950,
+  color: THEME.text,
+},
+
+signOutBtn: {
+  padding: "6px 10px",
+  borderRadius: 10,
+  border: `1px solid ${THEME.border}`,
+  background: "rgba(255,255,255,0.85)",
+  backdropFilter: "blur(8px)",
+  color: THEME.text,
+  fontWeight: 900,
+  fontSize: 12,
+  cursor: "pointer",
+  boxShadow: THEME.shadow,
+  alignSelf: "flex-start", // pushes it upward within header row
+},
+
+segmentWrap: {
+  marginTop: 12,
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 6,
+  padding: 6,
+  borderRadius: 14,
+  border: `1px solid ${THEME.border}`,
+  background: "rgba(255,255,255,0.75)",
+  backdropFilter: "blur(10px)",
+  boxShadow: THEME.shadow,
+},
+
+segmentBtn: {
+  padding: "10px 10px",
+  borderRadius: 12,
+  border: "1px solid transparent",
+  background: "transparent",
+  color: THEME.muted,
+  fontWeight: 950,
+  cursor: "pointer",
+},
+
+segmentBtnActive: {
+  background: THEME.card,
+  border: `1px solid ${THEME.border}`,
+  color: THEME.text,
+  boxShadow: "0 6px 16px rgba(58,50,46,0.10)",
+},
+
+segmentWrap2: {
+  marginTop: 12,
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 6,
+  padding: 6,
+  borderRadius: 14,
+  border: `1px solid ${THEME.border}`,
+  background: "rgba(255,255,255,0.75)",
+  backdropFilter: "blur(10px)",
+  boxShadow: THEME.shadow,
+},
+
 };
